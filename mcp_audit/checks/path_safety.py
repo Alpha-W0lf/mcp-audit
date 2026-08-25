@@ -65,8 +65,8 @@ from typing import Any
 
 from mcp_audit.checks.runtime_required import baseline_arguments
 from mcp_audit.driver import AdvertisedTool, call_tool_normalized
-from mcp_audit.models import CheckResult, Status
-from mcp_audit.registry import CheckContext, check
+from mcp_audit.models import MAX_ERROR_TEXT, CheckResult, Status
+from mcp_audit.registry import CheckContext, check, sandbox_roots_from_extra
 from mcp_audit.safety import probe_eligibility
 
 CITATION_4686 = "https://github.com/modelcontextprotocol/servers/issues/4686"
@@ -144,22 +144,6 @@ def path_like_properties(tool: AdvertisedTool) -> list[str]:
         if is_string and _is_path_like_name(prop_name):
             matches.append(prop_name)
     return sorted(matches, key=_priority)
-
-
-def _sandbox_roots(extra: dict[str, Any]) -> list[Path]:
-    raw = extra.get("sandbox_roots", extra.get("sandbox_root"))
-    if raw is None:
-        return []
-    items = raw if isinstance(raw, (list, tuple, set)) else [raw]
-    roots: list[Path] = []
-    for item in items:
-        try:
-            path = Path(item)
-        except TypeError:
-            continue
-        if path.is_dir():
-            roots.append(path)
-    return roots
 
 
 def _find_literal_file(roots: list[Path], literal_name: str) -> Path | None:
@@ -289,7 +273,7 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
         # the server also did NOT materialize the probe path as a literal
         # file in a known sandbox root. (An error echoing the probe value
         # while still writing the file is an overclaim trap.)
-        roots = _sandbox_roots(ctx.extra)
+        roots = sandbox_roots_from_extra(ctx.extra)
         literal = _find_literal_file(roots, PROBE_VALUE)
         cleanup: str | None = None
         if literal is not None:
@@ -306,7 +290,7 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
                     "roots (conformant validation)",
                     tool_name=probed.name,
                     probe_value=PROBE_VALUE,
-                    error=msg[:2000],
+                    error=msg[:MAX_ERROR_TEXT],
                 )
             )
         else:
@@ -326,18 +310,18 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
                         if literal is not None
                         else "unattributable_error"
                     ),
-                    error=msg[:2000],
+                    error=msg[:MAX_ERROR_TEXT],
                     **({"cleanup": cleanup} if cleanup is not None else {}),
                 )
             )
         return results
 
-    roots = _sandbox_roots(ctx.extra)
+    roots = sandbox_roots_from_extra(ctx.extra)
     literal = _find_literal_file(roots, PROBE_VALUE)
     details: dict[str, Any] = {
         "probe_value": PROBE_VALUE,
         "path_property": target_prop,
-        "result_text": msg[:2000],
+        "result_text": msg[:MAX_ERROR_TEXT],
         "corroborated": literal is not None,
     }
     if literal is None:

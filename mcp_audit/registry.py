@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
@@ -49,6 +50,30 @@ class CheckContext:
     allow_destructive: bool = False
     call_timeout: float = 10.0
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+def sandbox_roots_from_extra(extra: dict[str, Any]) -> list[Path]:
+    """Parse ``CheckContext.extra["sandbox_roots"]`` into existing directories.
+
+    Single parser shared by checks that place probe fixtures (ENCODING001) or
+    corroborate filesystem side effects (PATHSAFE001). Only the plural key is
+    honored — the CLI sets it from ``--arg`` values and nothing else populates
+    the context. Entries that are not existing directories are dropped: the
+    audit tool never creates directories.
+    """
+    raw = extra.get("sandbox_roots")
+    if raw is None:
+        return []
+    items = raw if isinstance(raw, (list, tuple, set)) else [raw]
+    roots: list[Path] = []
+    for item in items:
+        try:
+            path = Path(item)
+        except TypeError:
+            continue
+        if path.is_dir():
+            roots.append(path)
+    return roots
 
 
 def _validate(spec_id: str, severity: str, scope: str) -> None:

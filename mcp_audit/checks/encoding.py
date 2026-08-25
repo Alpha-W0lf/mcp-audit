@@ -45,7 +45,7 @@ from typing import Any
 
 from mcp_audit.driver import call_tool_normalized
 from mcp_audit.models import CheckResult, Severity, Status
-from mcp_audit.registry import CheckContext, check
+from mcp_audit.registry import CheckContext, check, sandbox_roots_from_extra
 from mcp_audit.safety import probe_eligibility
 
 CITATION_4666 = "https://github.com/modelcontextprotocol/servers/issues/4666"
@@ -174,16 +174,6 @@ def _write_fixture(sandbox_roots: list[str] | None = None) -> str:
     raise OSError("could not write the ENCODING001 probe fixture anywhere")
 
 
-def _sandbox_roots_from_ctx(ctx: CheckContext) -> list[str]:
-    extra = getattr(ctx, "extra", None) or {}
-    raw = extra.get("sandbox_roots", extra.get("sandbox_root"))
-    if raw is None:
-        return []
-    if isinstance(raw, (str, Path)):
-        return [str(raw)]
-    return [str(r) for r in raw]
-
-
 def _result(
     status: Status, message: str, tool_name: str | None, details: dict[str, Any]
 ) -> CheckResult:
@@ -294,7 +284,7 @@ async def check_encoding_chunk_boundaries(
     if not candidates:
         return [_result("skip", "no file-reading tool to probe", None, {})]
 
-    fixture_path = _write_fixture(_sandbox_roots_from_ctx(ctx))
+    fixture_path = _write_fixture(sandbox_roots_from_extra(ctx.extra))
     try:
         return [await _probe_tool(ctx, tool, fixture_path) for tool in candidates]
     finally:

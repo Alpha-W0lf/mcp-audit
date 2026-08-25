@@ -346,7 +346,7 @@ async def test_real_filesystem_bug_fails_corroborates_and_cleans_up(tmp_path):
             handle.session,
             handle.tools,
             allow_destructive=True,
-            extra={"sandbox_root": str(sandbox)},
+            extra={"sandbox_roots": [str(sandbox)]},
         )
         results = await REGISTRY.get("PATHSAFE001").fn(ctx)
 
