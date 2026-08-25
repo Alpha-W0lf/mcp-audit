@@ -28,6 +28,7 @@ from mcp_audit.checks.encoding import (
     is_file_reader,
 )
 from mcp_audit.driver import AdvertisedTool, connect
+from mcp_audit.models import CheckResult
 from mcp_audit.registry import REGISTRY, CheckContext, load_checks
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -75,9 +76,11 @@ def _load():
     load_checks()
 
 
-async def _run(session, tools, **kw) -> list:
+async def _run(session, tools, **kw) -> list[CheckResult]:
     ctx = CheckContext(session=session, tools=tools, **kw)
-    return await REGISTRY.get(CHECK_ID).fn(ctx)
+    result = await REGISTRY.get(CHECK_ID).fn(ctx)
+    assert isinstance(result, list)
+    return result
 
 
 # --- pure fixture builder -----------------------------------------------------

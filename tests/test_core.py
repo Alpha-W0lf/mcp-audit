@@ -106,7 +106,9 @@ class TestRegistry:
 
 class TestSafetyGate:
     def _tool(self, annotations: dict | None) -> AdvertisedTool:
-        return AdvertisedTool(name="t", description=None, input_schema={}, annotations=annotations)
+        return AdvertisedTool(
+            name="t", description=None, input_schema={}, annotations=annotations or {}
+        )
 
     def test_read_only_true_is_eligible(self):
         d = probe_eligibility(self._tool({"readOnlyHint": True}))

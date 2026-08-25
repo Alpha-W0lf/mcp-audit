@@ -36,6 +36,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "BLE", "SIM"]
 
+[tool.mypy]
+python_version = "3.11"
+# The mcp SDK types are pydantic models; the plugin understands their field
+# aliases, so wire-format kwargs (e.g. inputSchema=...) type-check.
+plugins = ["pydantic.mypy"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
