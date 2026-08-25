@@ -36,15 +36,19 @@ Probe protocol (single probe, POSIX hosts only)
    - error result whose text hits rejection vocabulary AND no literal
      backslash file appeared in the known sandbox roots -> PASS (server
      validates). Merely echoing the probe value in an unrelated error is
-     NOT accepted as a rejection — that shape overclaims.
+     NOT accepted as a rejection — that shape overclaims. A conformant
+     server may reject at argument validation rather than filesystem path
+     validation; both produce no literal file, and the vocabulary
+     requirement keeps the PASS attributable to path handling, so the
+     corroboration still holds.
    - any other error (or an unverifiable "rejection")      -> SKIP
      (cannot attribute the failure to path handling);
    - success                                                -> FAIL (#4686
-     shape). When a sandbox root is supplied via
-     ``ctx.extra["sandbox_root"]`` / ``["sandbox_roots"]``, the check
-     corroborates the bug by locating the literal backslash filename there,
-     records its absolute path in details, and DELETES it (cleanup); without
-     a known root, acceptance alone is still reported FAIL.
+     shape). When sandbox roots are supplied via
+     ``ctx.extra["sandbox_roots"]``, the check corroborates the bug by
+     locating the literal backslash filename there, records its absolute
+     path in details, and DELETES it (cleanup); without a known root,
+     acceptance alone is still reported FAIL.
 
 Non-POSIX hosts (`os.name != "posix"`) skip entirely: drive-letter input is
 native there, so acceptance is correct behavior.
