@@ -56,9 +56,7 @@ def schema_problems(tool_name: str, schema: dict[str, Any]) -> list[str]:
             continue
         ptype = spec.get("type")
         if ptype is None and "anyOf" not in spec and "$ref" not in spec:
-            problems.append(
-                f"{tool_name}.{name}: property has no type (and no anyOf/$ref)"
-            )
+            problems.append(f"{tool_name}.{name}: property has no type (and no anyOf/$ref)")
         elif isinstance(ptype, str) and ptype not in VALID_TYPES:
             problems.append(f"{tool_name}.{name}: invalid type {ptype!r}")
 
@@ -67,6 +65,17 @@ def schema_problems(tool_name: str, schema: dict[str, Any]) -> list[str]:
 
 @check(id="SCHEMA001", severity="error", citation=CITATION_4651, scope="schema")
 async def check_schema_well_formed(ctx: CheckContext) -> list[CheckResult]:
+    if not ctx.tools:
+        return [
+            CheckResult(
+                check_id="SCHEMA001",
+                severity="error",
+                status="skip",
+                message="server advertises no tools; nothing to check",
+                citation=CITATION_4651,
+                details={},
+            )
+        ]
     results: list[CheckResult] = []
     for tool in ctx.tools:
         problems = schema_problems(tool.name, tool.input_schema)
@@ -76,9 +85,7 @@ async def check_schema_well_formed(ctx: CheckContext) -> list[CheckResult]:
                 severity="error",
                 status="pass" if not problems else "fail",
                 message=(
-                    "inputSchema internally consistent"
-                    if not problems
-                    else "; ".join(problems)
+                    "inputSchema internally consistent" if not problems else "; ".join(problems)
                 ),
                 citation=CITATION_4651,
                 tool_name=tool.name,

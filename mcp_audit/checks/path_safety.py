@@ -33,9 +33,11 @@ Probe protocol (single probe, POSIX hosts only)
    RUNTIME001) except the path property = `C:\\mcp-audit-probe.txt`, a
    drive-letter form pointing OUTSIDE any allowed root.
 4. Outcomes:
-   - error result that reads as a path validation rejection -> PASS
-     (server validates);
-   - any other error                                        -> SKIP
+   - error result whose text hits rejection vocabulary AND no literal
+     backslash file appeared in the known sandbox roots -> PASS (server
+     validates). Merely echoing the probe value in an unrelated error is
+     NOT accepted as a rejection — that shape overclaims.
+   - any other error (or an unverifiable "rejection")      -> SKIP
      (cannot attribute the failure to path handling);
    - success                                                -> FAIL (#4686
      shape). When a sandbox root is supplied via
@@ -61,9 +63,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from mcp_audit.checks.runtime_required import _call as _call_tool
 from mcp_audit.checks.runtime_required import baseline_arguments
-from mcp_audit.driver import AdvertisedTool
+from mcp_audit.driver import AdvertisedTool, call_tool_normalized
 from mcp_audit.models import CheckResult, Status
 from mcp_audit.registry import CheckContext, check
 from mcp_audit.safety import probe_eligibility
@@ -170,15 +171,17 @@ def _find_literal_file(roots: list[Path], literal_name: str) -> Path | None:
 
 
 def _looks_like_path_rejection(error_text: str) -> bool:
+    """True iff the error text uses path-rejection vocabulary.
+
+    Deliberately does NOT treat the probe value appearing anywhere in the
+    message as a rejection: a server erroring for unrelated reasons while
+    echoing the path is inconclusive, not conformant.
+    """
     lowered = error_text.lower()
-    if PROBE_VALUE.lower() in lowered:
-        return True
     return any(term in lowered for term in _REJECTION_VOCAB)
 
 
-def _result(
-    status: Status, message: str, *, tool_name: str | None, **details
-) -> CheckResult:
+def _result(status: Status, message: str, *, tool_name: str | None, **details) -> CheckResult:
     return CheckResult(
         check_id=CHECK_ID,
         severity="error",
@@ -192,9 +195,7 @@ def _result(
 
 def _prefers_writer(tool: AdvertisedTool) -> int:
     ann = tool.annotations or {}
-    writes_asserted = (
-        ann.get("destructiveHint") is True or ann.get("readOnlyHint") is False
-    )
+    writes_asserted = ann.get("destructiveHint") is True or ann.get("readOnlyHint") is False
     return 0 if writes_asserted else 1
 
 
@@ -281,10 +282,23 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
     args = dict(base_args)
     args[target_prop] = PROBE_VALUE
 
-    ok, msg = await _call_tool(ctx.session, probed.name, args, ctx.call_timeout)
+    ok, msg = await call_tool_normalized(ctx.session, probed.name, args, ctx.call_timeout)
 
     if not ok:
-        if _looks_like_path_rejection(msg):
+        # Corroborate before scoring PASS: the "rejection" only counts when
+        # the server also did NOT materialize the probe path as a literal
+        # file in a known sandbox root. (An error echoing the probe value
+        # while still writing the file is an overclaim trap.)
+        roots = _sandbox_roots(ctx.extra)
+        literal = _find_literal_file(roots, PROBE_VALUE)
+        cleanup: str | None = None
+        if literal is not None:
+            try:
+                literal.unlink()
+                cleanup = "removed"
+            except OSError as e:
+                cleanup = f"failed: {type(e).__name__}: {e}"
+        if _looks_like_path_rejection(msg) and literal is None:
             results.append(
                 _result(
                     "pass",
@@ -296,14 +310,24 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
                 )
             )
         else:
+            reason = (
+                "error reads as a path rejection but the probe file was "
+                "created in a sandbox root anyway; outcome inconclusive"
+                if literal is not None
+                else "tool errored for reasons unrelated to path validation; outcome inconclusive"
+            )
             results.append(
                 _result(
                     "skip",
-                    "tool errored for reasons unrelated to path validation; "
-                    "outcome inconclusive",
+                    reason,
                     tool_name=probed.name,
-                    skip_reason="unattributable_error",
+                    skip_reason=(
+                        "rejection_not_corroborated"
+                        if literal is not None
+                        else "unattributable_error"
+                    ),
                     error=msg[:2000],
+                    **({"cleanup": cleanup} if cleanup is not None else {}),
                 )
             )
         return results
@@ -325,10 +349,7 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
     message = f"accepted Windows drive-letter path {PROBE_VALUE!r} on POSIX"
     if literal is not None:
         details["literal_file_created"] = str(literal)
-        message += (
-            " and created a literal backslash filename inside the sandbox "
-            f"root ({literal})"
-        )
+        message += f" and created a literal backslash filename inside the sandbox root ({literal})"
         try:
             literal.unlink()
             details["cleanup"] = "removed"

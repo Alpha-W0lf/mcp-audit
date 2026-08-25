@@ -36,25 +36,22 @@ without changing callers.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import re
-from pathlib import Path
-
 import tempfile
+from pathlib import Path
 from typing import Any
 
-from mcp import types as mcp_types
-
-from mcp_audit.models import CheckResult, Status
+from mcp_audit.driver import call_tool_normalized
+from mcp_audit.models import CheckResult, Severity, Status
 from mcp_audit.registry import CheckContext, check
 from mcp_audit.safety import probe_eligibility
 
 CITATION_4666 = "https://github.com/modelcontextprotocol/servers/issues/4666"
 
 CHECK_ID = "ENCODING001"
-SEVERITY = "error"
+SEVERITY: Severity = "error"
 
 # 3 bytes in UTF-8 (\xe2\x82\xac) — same corruption class as the CJK
 # sequences reported in #4666.
@@ -135,9 +132,7 @@ def _boundary_artifacts(text: str, limit: int | None) -> list[str]:
     artifacts: list[str] = []
     replacements = text.count("\ufffd")
     if replacements:
-        artifacts.append(
-            f"{replacements} U+FFFD replacement character(s) in returned content"
-        )
+        artifacts.append(f"{replacements} U+FFFD replacement character(s) in returned content")
     for boundary in BOUNDARIES:
         marker_offset = boundary - (len(MARKER_BYTES) - 1)
         if limit is not None and marker_offset >= limit:
@@ -153,28 +148,33 @@ def _boundary_artifacts(text: str, limit: int | None) -> list[str]:
 def _write_fixture(sandbox_roots: list[str] | None = None) -> str:
     """Write the boundary fixture. Prefers the server's sandbox root so the
     file sits inside the server's allowed directories; falls back to system
-    temp (probes will then likely be rejected by path validation)."""
+    temp (probes will then likely be rejected by path validation).
+
+    The audit tool NEVER creates directories: a candidate root is used only
+    when it already exists and is a directory (mirroring the is_dir() filter
+    in mcp_audit.checks.path_safety._sandbox_roots). Fixture names come from
+    tempfile.mkstemp — unpredictable, so a hostile server cannot pre-place a
+    symlink at a guessed path and redirect the write.
+    """
     payload = boundary_fixture()
-    for root in sandbox_roots or []:
+    dirs = [Path(root) for root in sandbox_roots or [] if Path(root).is_dir()]
+    dirs.append(Path(tempfile.gettempdir()))
+    for directory in dirs:
         try:
-            root_path = Path(root).resolve()
-            root_path.mkdir(parents=True, exist_ok=True)
-            path = root_path / f"mcp-audit-enc001-{os.getpid()}{_FIXTURE_SUFFIX}"
-            path.write_bytes(payload)
-            return str(path)
+            fd, path = tempfile.mkstemp(
+                dir=directory, prefix="mcp-audit-enc001-", suffix=_FIXTURE_SUFFIX
+            )
         except OSError:
             continue
-    fd, path = tempfile.mkstemp(prefix="mcp-audit-enc001-", suffix=_FIXTURE_SUFFIX)
-    try:
-        os.write(fd, payload)
-    finally:
-        os.close(fd)
-    return path
+        try:
+            os.write(fd, payload)
+        finally:
+            os.close(fd)
+        return path
+    raise OSError("could not write the ENCODING001 probe fixture anywhere")
 
 
-
-
-def _sandbox_roots_from_ctx(ctx) -> list[str]:
+def _sandbox_roots_from_ctx(ctx: CheckContext) -> list[str]:
     extra = getattr(ctx, "extra", None) or {}
     raw = extra.get("sandbox_roots", extra.get("sandbox_root"))
     if raw is None:
@@ -182,27 +182,6 @@ def _sandbox_roots_from_ctx(ctx) -> list[str]:
     if isinstance(raw, (str, Path)):
         return [str(raw)]
     return [str(r) for r in raw]
-
-async def _call_tool(
-    session: Any, name: str, arguments: dict[str, Any], timeout: float
-) -> tuple[bool, str]:
-    """Call a tool; normalize protocol errors and isError results into text."""
-    try:
-        result: mcp_types.CallToolResult = await asyncio.wait_for(
-            session.call_tool(name, arguments=arguments), timeout=timeout
-        )
-    except TimeoutError:
-        return False, f"probe timed out after {timeout}s"
-    except Exception as e:  # noqa: BLE001 — protocol/connection failures are probe outcomes
-        return False, f"{type(e).__name__}: {e}"
-
-    parts: list[str] = []
-    for block in result.content or []:
-        if isinstance(block, mcp_types.TextContent):
-            parts.append(block.text)
-        else:
-            parts.append(f"<{type(block).__name__}>")
-    return (not result.is_error), "\n".join(parts).strip()
 
 
 def _result(
@@ -245,18 +224,16 @@ async def _probe_tool(ctx: CheckContext, tool: Any, fixture_path: str) -> CheckR
         )
 
     limit_arg = find_limit_argument(tool)
-    probe_limits: tuple[int | None, ...] = (
-        BOUNDARIES if limit_arg is not None else (None,)
-    )
+    probe_limits: tuple[int | None, ...] = BOUNDARIES if limit_arg is not None else (None,)
 
     probe_records: list[dict[str, Any]] = []
     artifacts: list[str] = []
     call_failure: str | None = None
     for limit in probe_limits:
         args: dict[str, Any] = {path_arg: fixture_path}
-        if limit is not None:
+        if limit is not None and limit_arg is not None:
             args[limit_arg] = limit
-        ok, text = await _call_tool(ctx.session, tool.name, args, ctx.call_timeout)
+        ok, text = await call_tool_normalized(ctx.session, tool.name, args, ctx.call_timeout)
         if not ok:
             call_failure = (
                 f"probe call failed (limit={limit}): {text}"

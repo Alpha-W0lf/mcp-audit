@@ -18,6 +18,7 @@ Hardened for v0.2:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import tempfile
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -33,6 +34,32 @@ _STDERR_TAIL_BYTES = 8192
 
 class ServerStartupError(RuntimeError):
     """Server failed to start or initialize within the timeout."""
+
+
+async def call_tool_normalized(
+    session: Any, name: str, arguments: dict[str, Any], timeout: float
+) -> tuple[bool, str]:
+    """Call a tool; normalize protocol errors and isError results into text.
+
+    Shared probe primitive for all runtime checks. Returns
+    (succeeded, message_or_content_text).
+    """
+    try:
+        result: types.CallToolResult = await asyncio.wait_for(
+            session.call_tool(name, arguments=arguments), timeout=timeout
+        )
+    except TimeoutError:
+        return False, f"probe timed out after {timeout}s"
+    except Exception as e:  # noqa: BLE001 — protocol/connection failures are probe outcomes
+        return False, f"{type(e).__name__}: {e}"
+
+    text_parts: list[str] = []
+    for block in result.content or []:
+        if isinstance(block, types.TextContent):
+            text_parts.append(block.text)
+        else:
+            text_parts.append(f"<{type(block).__name__}>")
+    return (not result.is_error), "\n".join(text_parts).strip()
 
 
 @dataclass(frozen=True)
@@ -97,9 +124,7 @@ async def _session_lifecycle(
         async with ClientSession(read, write) as session:
             try:
                 await asyncio.wait_for(session.initialize(), timeout=startup_timeout)
-                result = await asyncio.wait_for(
-                    session.list_tools(), timeout=startup_timeout
-                )
+                result = await asyncio.wait_for(session.list_tools(), timeout=startup_timeout)
             except TimeoutError as e:
                 raise ServerStartupError(
                     f"server did not complete initialization within "
@@ -107,8 +132,7 @@ async def _session_lifecycle(
                 ) from e
             except Exception as e:
                 raise ServerStartupError(
-                    f"server died before/during initialize. "
-                    f"stderr tail:\n{_safe_tail(errlog)}"
+                    f"server died before/during initialize. stderr tail:\n{_safe_tail(errlog)}"
                 ) from e
             yield ServerHandle(
                 session=session,
@@ -166,10 +190,8 @@ async def connect(
                 raise startup from None
             raise
     finally:
-        try:
+        with contextlib.suppress(OSError):
             errlog.close()
-        except OSError:
-            pass
 
 
 def _safe_tail(errlog: Any) -> str:

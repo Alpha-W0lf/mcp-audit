@@ -39,24 +39,15 @@ class ProbeDecision:
 
 
 def _annotations(tool: Any) -> dict[str, Any]:
+    """Plain-dict annotations, already canonicalized to wire-format keys.
+
+    The snake_case->camelCase SDK mapping lives in exactly one place:
+    mcp_audit.driver._tool_annotations, applied when tools are advertised.
+    """
     ann = getattr(tool, "annotations", None)
     if isinstance(ann, dict):
         return dict(ann)
-    # Raw SDK Tool objects (snake_case attrs) — normalize to wire-format keys.
-    out: dict[str, Any] = {}
-    for attr, wire in (
-        ("read_only_hint", "readOnlyHint"),
-        ("destructive_hint", "destructiveHint"),
-        ("idempotent_hint", "idempotentHint"),
-        ("open_world_hint", "openWorldHint"),
-        # camelCase fallback for other MCP SDK major versions
-        ("readOnlyHint", "readOnlyHint"),
-        ("destructiveHint", "destructiveHint"),
-    ):
-        val = getattr(ann, attr, None)
-        if val is not None:
-            out[wire] = val
-    return out
+    return {}
 
 
 def probe_eligibility(tool: Any, *, allow_destructive: bool = False) -> ProbeDecision:
@@ -90,8 +81,4 @@ def probe_eligibility(tool: Any, *, allow_destructive: bool = False) -> ProbeDec
 
 
 def eligible_tools(tools: list[Any], *, allow_destructive: bool = False) -> list[Any]:
-    return [
-        t
-        for t in tools
-        if probe_eligibility(t, allow_destructive=allow_destructive).eligible
-    ]
+    return [t for t in tools if probe_eligibility(t, allow_destructive=allow_destructive).eligible]

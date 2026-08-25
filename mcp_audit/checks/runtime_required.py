@@ -27,28 +27,15 @@ operator passes --allow-destructive. Annotations are hints, not guarantees.
 
 from __future__ import annotations
 
-import asyncio
 import re
 from typing import Any
 
-from mcp import types as mcp_types
-
-from mcp_audit.driver import AdvertisedTool
-from mcp_audit.models import CheckResult
+from mcp_audit.driver import AdvertisedTool, call_tool_normalized
+from mcp_audit.models import CheckResult, Severity, Status
 from mcp_audit.registry import CheckContext, check
 from mcp_audit.safety import probe_eligibility
 
 CITATION_4651 = "https://github.com/modelcontextprotocol/servers/issues/4651"
-
-_SYNTHETIC_VALUES: dict[str, Any] = {
-    "string": "mcp-audit-probe",
-    "number": 0,
-    "integer": 0,
-    "boolean": False,
-    "array": [],
-    "object": {},
-    "null": None,
-}
 
 
 def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
@@ -74,7 +61,7 @@ def _synthesize_string(prop_spec: dict[str, Any]) -> Any:
     candidate = "mcp-audit"
     if len(candidate) < min_len:
         candidate = (candidate + "-") * (min_len // len(candidate) + 1)
-        candidate = candidate[:max(min_len, 1)]
+        candidate = candidate[: max(min_len, 1)]
     # maxLength: truncate if the schema forbids our default length.
     max_len = prop_spec.get("maxLength")
     if isinstance(max_len, int) and max_len >= 0:
@@ -91,11 +78,7 @@ def _synthesize(prop_spec: dict[str, Any]) -> Any:
         return prop_spec["default"]
     if "const" in prop_spec:
         return prop_spec["const"]
-    if (
-        "enum" in prop_spec
-        and isinstance(prop_spec["enum"], list)
-        and prop_spec["enum"]
-    ):
+    if "enum" in prop_spec and isinstance(prop_spec["enum"], list) and prop_spec["enum"]:
         return prop_spec["enum"][0]
     if anyOf := prop_spec.get("anyOf"):
         for sub in anyOf:
@@ -154,45 +137,29 @@ def baseline_arguments(tool: AdvertisedTool) -> dict[str, Any] | None:
     return args
 
 
-async def _call(
-    session: Any, name: str, arguments: dict[str, Any], timeout: float
-) -> tuple[bool, str]:
-    """Call a tool; normalize protocol errors and isError results into text.
-
-    Returns (succeeded, message_or_content_text).
-    """
-    try:
-        result: mcp_types.CallToolResult = await asyncio.wait_for(
-            session.call_tool(name, arguments=arguments), timeout=timeout
-        )
-    except TimeoutError:
-        return False, f"probe timed out after {timeout}s"
-    except Exception as e:  # noqa: BLE001 — protocol/connection failures are probe outcomes
-        return False, f"{type(e).__name__}: {e}"
-
-    text_parts: list[str] = []
-    for block in result.content or []:
-        if isinstance(block, mcp_types.TextContent):
-            text_parts.append(block.text)
-        else:
-            text_parts.append(f"<{type(block).__name__}>")
-    text = "\n".join(text_parts).strip()
-    return (not result.is_error), text
-
-
 def _mentioned_field(error_text: str, candidates: list[str]) -> str | None:
     """First candidate field name appearing as a word in the error text."""
     lowered = error_text.lower()
     for field_name in sorted(candidates, key=len, reverse=True):
-        if re.search(
-            rf"(?<![a-z0-9_]){re.escape(field_name.lower())}(?![a-z0-9_])", lowered
-        ):
+        if re.search(rf"(?<![a-z0-9_]){re.escape(field_name.lower())}(?![a-z0-9_])", lowered):
             return field_name
     return None
 
 
 @check(id="RUNTIME001", severity="error", citation=CITATION_4651, scope="runtime")
 async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
+    if not ctx.tools:
+        return [
+            CheckResult(
+                check_id="RUNTIME001",
+                severity="error",
+                status="skip",
+                message="server advertises no tools; nothing to probe",
+                citation=CITATION_4651,
+                details={},
+            )
+        ]
+
     results: list[CheckResult] = []
 
     for tool in ctx.tools:
@@ -244,7 +211,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
             )
             continue
 
-        ok, msg = await _call(ctx.session, tool.name, base_args, ctx.call_timeout)
+        ok, msg = await call_tool_normalized(ctx.session, tool.name, base_args, ctx.call_timeout)
         if not ok:
             # Baseline failure is itself diagnostic when the error names a
             # field the schema does NOT advertise as required (#4651 class:
@@ -252,8 +219,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
             unadvertised = [
                 name
                 for name in tool.properties
-                if name not in tool.required_fields
-                and _mentioned_field(msg, [name])
+                if name not in tool.required_fields and _mentioned_field(msg, [name])
             ]
             if unadvertised:
                 results.append(
@@ -290,26 +256,22 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
 
         warnings: list[str] = []
         errors: list[str] = []
-        inconclusive: list[str] = []
+        inconclusive: list[dict[str, Any]] = []
 
         for omitted in required:
             probe_args = {k: v for k, v in base_args.items() if k != omitted}
-            ok, msg = await _call(ctx.session, tool.name, probe_args, ctx.call_timeout)
+            ok, msg = await call_tool_normalized(
+                ctx.session, tool.name, probe_args, ctx.call_timeout
+            )
 
             if ok:
-                warnings.append(
-                    f"omit {omitted!r}: accepted — schema stricter than runtime"
-                )
+                warnings.append(f"omit {omitted!r}: accepted — schema stricter than runtime")
                 continue
 
             mentioned = _mentioned_field(
                 msg,
                 required
-                + [
-                    p
-                    for p in tool.input_schema.get("properties", {})
-                    if p not in required
-                ],
+                + [p for p in tool.input_schema.get("properties", {}) if p not in required],
             )
             if mentioned is None:
                 inconclusive.append({"omitted": omitted, "error": msg[:2000]})
@@ -332,6 +294,8 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                     f"field {mentioned!r} — runtime stricter than advertised"
                 )
 
+        status: Status
+        severity: Severity
         if errors:
             status, severity, message = "fail", "error", "; ".join(errors)
         elif warnings:
