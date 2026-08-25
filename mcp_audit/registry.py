@@ -93,9 +93,7 @@ class CheckRegistry:
         try:
             return self._checks[check_id]
         except KeyError:
-            raise KeyError(
-                f"unknown check id {check_id!r} (registered: {self.ids()})"
-            ) from None
+            raise KeyError(f"unknown check id {check_id!r} (registered: {self.ids()})") from None
 
     def ids(self) -> list[str]:
         return sorted(self._checks)
@@ -124,3 +122,8 @@ def check(
 def load_checks() -> None:
     """Import all built-in check modules so their @check decorators run."""
     import mcp_audit.checks  # noqa: F401  (package __init__ imports submodules)
+
+    if len(REGISTRY) == 0:  # pragma: no cover — import machinery failure
+        raise RegistryError(
+            "no checks registered after importing mcp_audit.checks; check modules failed to load"
+        )

@@ -6,8 +6,10 @@ programmatic consumers agree:
 
 - 0: every result is pass or skip (failed *warnings* do not trip CI — the
   warning severity exists precisely for "harmless direction" findings)
-- 1: at least one result has status=fail AND severity=error
+- 1: at least one result has status=fail AND severity=error, or the audit
+  itself failed (server startup / teardown crash — see AuditReport.error)
 - 2: usage error (handled by the CLI before any server is spawned)
+- 130: interrupted via SIGINT (handled by the CLI)
 """
 
 from __future__ import annotations
@@ -32,9 +34,10 @@ VALID_STATUSES: tuple[str, ...] = ("pass", "fail", "skip")
 EXIT_OK = 0
 EXIT_CHECKS_FAILED = 1
 EXIT_USAGE = 2
+EXIT_INTERRUPTED = 130  # 128 + SIGINT
 
 
-@dataclass
+@dataclass(frozen=True)
 class CheckResult:
     """Outcome of one check against one subject (usually a tool).
 
@@ -56,9 +59,7 @@ class CheckResult:
                 f"invalid severity {self.severity!r}; expected one of {VALID_SEVERITIES}"
             )
         if self.status not in VALID_STATUSES:
-            raise ValueError(
-                f"invalid status {self.status!r}; expected one of {VALID_STATUSES}"
-            )
+            raise ValueError(f"invalid status {self.status!r}; expected one of {VALID_STATUSES}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,11 +83,12 @@ class AuditReport:
     """All results from auditing one server process."""
 
     server_command: list[str]
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     results: list[CheckResult] = field(default_factory=list)
     tool_version: str = ""
+    # Set when the audit itself failed before/around check execution (e.g.
+    # the server never initialized); results stays empty in that case.
+    error: str | None = None
 
     @property
     def summary(self) -> dict[str, Any]:
@@ -104,7 +106,10 @@ class AuditReport:
 
     @property
     def exit_code(self) -> int:
-        """0 = all pass/skip; 1 = any failed check with severity=error."""
+        """0 = all pass/skip; 1 = any failed check with severity=error, or an
+        audit-level failure (error detail set)."""
+        if self.error is not None:
+            return EXIT_CHECKS_FAILED
         return (
             EXIT_CHECKS_FAILED
             if any(r.status == "fail" and r.severity == "error" for r in self.results)
@@ -120,6 +125,7 @@ class AuditReport:
                 "timestamp": self.timestamp,
                 "summary": self.summary,
                 "exit_code": self.exit_code,
+                "error": self.error,
                 "results": [r.to_dict() for r in self.results],
             },
             indent=indent,
