@@ -51,30 +51,90 @@ _SYNTHETIC_VALUES: dict[str, Any] = {
 }
 
 
+def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
+    """Numeric synthesis honoring minimum/maximum/exclusive bounds."""
+    lo = prop_spec.get("minimum")
+    hi = prop_spec.get("maximum")
+    if lo is None:
+        xlo = prop_spec.get("exclusiveMinimum")
+        lo = (xlo + 1) if isinstance(xlo, (int, float)) else 1
+    value = lo
+    if hi is not None and value > hi:
+        value = hi
+        if value < lo:
+            return _SENTINEL_UNSYNTHESIZABLE
+    if is_int or isinstance(value, int):
+        return int(value)
+    return value
+
+
+def _synthesize_string(prop_spec: dict[str, Any]) -> Any:
+    """String synthesis honoring minLength; best-effort for patterns."""
+    min_len = prop_spec.get("minLength") or 0
+    candidate = "mcp-audit"
+    if len(candidate) < min_len:
+        candidate = (candidate + "-") * (min_len // len(candidate) + 1)
+        candidate = candidate[:max(min_len, 1)]
+    # maxLength: truncate if the schema forbids our default length.
+    max_len = prop_spec.get("maxLength")
+    if isinstance(max_len, int) and max_len >= 0:
+        candidate = candidate[:max_len]
+        if len(candidate) < min_len:
+            return _SENTINEL_UNSYNTHESIZABLE
+    return candidate
+
+
 def _synthesize(prop_spec: dict[str, Any]) -> Any:
-    ptype = prop_spec.get("type")
-    if isinstance(ptype, list):
-        for candidate in ptype:
-            if candidate in _SYNTHETIC_VALUES:
-                return _SYNTHETIC_VALUES[candidate]
+    if not isinstance(prop_spec, dict):
         return _SENTINEL_UNSYNTHESIZABLE
-    if isinstance(ptype, str) and ptype in _SYNTHETIC_VALUES:
-        return _SYNTHETIC_VALUES[ptype]
     if "default" in prop_spec:
         return prop_spec["default"]
+    if "const" in prop_spec:
+        return prop_spec["const"]
     if (
         "enum" in prop_spec
         and isinstance(prop_spec["enum"], list)
         and prop_spec["enum"]
     ):
         return prop_spec["enum"][0]
-    if "const" in prop_spec:
-        return prop_spec["const"]
     if anyOf := prop_spec.get("anyOf"):
         for sub in anyOf:
             val = _synthesize(sub if isinstance(sub, dict) else {})
             if val is not _SENTINEL_UNSYNTHESIZABLE:
                 return val
+        return _SENTINEL_UNSYNTHESIZABLE
+    ptype = prop_spec.get("type")
+    if isinstance(ptype, list):
+        for candidate in ptype:
+            val = _synthesize({**prop_spec, "type": candidate})
+            if val is not _SENTINEL_UNSYNTHESIZABLE:
+                return val
+        return _SENTINEL_UNSYNTHESIZABLE
+    if ptype in ("integer", "number"):
+        return _synthesize_number(prop_spec, ptype == "integer")
+    if ptype == "boolean":
+        return True
+    if ptype == "string":
+        return _synthesize_string(prop_spec)
+    if ptype == "array":
+        min_items = prop_spec.get("minItems") or 0
+        if min_items == 0:
+            return []
+        item_spec = prop_spec.get("items") or {}
+        val = _synthesize(item_spec if isinstance(item_spec, dict) else {})
+        return [val] if val is not _SENTINEL_UNSYNTHESIZABLE else _SENTINEL_UNSYNTHESIZABLE
+    if ptype == "object":
+        sub_props = prop_spec.get("properties", {})
+        sub_required = prop_spec.get("required", [])
+        if not sub_required:
+            return {}
+        out = {}
+        for field in sub_required:
+            val = _synthesize(sub_props.get(field, {}))
+            if val is _SENTINEL_UNSYNTHESIZABLE:
+                return _SENTINEL_UNSYNTHESIZABLE
+            out[field] = val
+        return out
     return _SENTINEL_UNSYNTHESIZABLE
 
 
@@ -186,20 +246,46 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
 
         ok, msg = await _call(ctx.session, tool.name, base_args, ctx.call_timeout)
         if not ok:
-            results.append(
-                CheckResult(
-                    check_id="RUNTIME001",
-                    severity="error",
-                    status="skip",
-                    message=(
-                        "baseline call with all required fields failed; cannot "
-                        "attribute failures to individual omissions"
-                    ),
-                    citation=CITATION_4651,
-                    tool_name=tool.name,
-                    details={"baseline_error": msg[:2000]},
+            # Baseline failure is itself diagnostic when the error names a
+            # field the schema does NOT advertise as required (#4651 class:
+            # runtime enforces more than tools/list advertises).
+            unadvertised = [
+                name
+                for name in tool.properties
+                if name not in tool.required_fields
+                and _mentioned_field(msg, [name])
+            ]
+            if unadvertised:
+                results.append(
+                    CheckResult(
+                        check_id="RUNTIME001",
+                        severity="error",
+                        status="fail",
+                        message=(
+                            f"runtime validation requires {unadvertised!r} but "
+                            f"inputSchema.required omits them (advertised required: "
+                            f"{tool.required_fields!r}) — schema/runtime mismatch"
+                        ),
+                        citation=CITATION_4651,
+                        tool_name=tool.name,
+                        details={"baseline_error": msg[:2000]},
+                    )
                 )
-            )
+            else:
+                results.append(
+                    CheckResult(
+                        check_id="RUNTIME001",
+                        severity="error",
+                        status="skip",
+                        message=(
+                            "baseline call with all required fields failed; cannot "
+                            "attribute failures to individual omissions"
+                        ),
+                        citation=CITATION_4651,
+                        tool_name=tool.name,
+                        details={"baseline_error": msg[:2000]},
+                    )
+                )
             continue
 
         warnings: list[str] = []

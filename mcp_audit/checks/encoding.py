@@ -40,6 +40,8 @@ import asyncio
 import contextlib
 import os
 import re
+from pathlib import Path
+
 import tempfile
 from typing import Any
 
@@ -148,14 +150,38 @@ def _boundary_artifacts(text: str, limit: int | None) -> list[str]:
     return artifacts
 
 
-def _write_fixture() -> str:
+def _write_fixture(sandbox_roots: list[str] | None = None) -> str:
+    """Write the boundary fixture. Prefers the server's sandbox root so the
+    file sits inside the server's allowed directories; falls back to system
+    temp (probes will then likely be rejected by path validation)."""
+    payload = boundary_fixture()
+    for root in sandbox_roots or []:
+        try:
+            root_path = Path(root).resolve()
+            root_path.mkdir(parents=True, exist_ok=True)
+            path = root_path / f"mcp-audit-enc001-{os.getpid()}{_FIXTURE_SUFFIX}"
+            path.write_bytes(payload)
+            return str(path)
+        except OSError:
+            continue
     fd, path = tempfile.mkstemp(prefix="mcp-audit-enc001-", suffix=_FIXTURE_SUFFIX)
     try:
-        os.write(fd, boundary_fixture())
+        os.write(fd, payload)
     finally:
         os.close(fd)
     return path
 
+
+
+
+def _sandbox_roots_from_ctx(ctx) -> list[str]:
+    extra = getattr(ctx, "extra", None) or {}
+    raw = extra.get("sandbox_roots", extra.get("sandbox_root"))
+    if raw is None:
+        return []
+    if isinstance(raw, (str, Path)):
+        return [str(raw)]
+    return [str(r) for r in raw]
 
 async def _call_tool(
     session: Any, name: str, arguments: dict[str, Any], timeout: float
@@ -291,7 +317,7 @@ async def check_encoding_chunk_boundaries(
     if not candidates:
         return [_result("skip", "no file-reading tool to probe", None, {})]
 
-    fixture_path = _write_fixture()
+    fixture_path = _write_fixture(_sandbox_roots_from_ctx(ctx))
     try:
         return [await _probe_tool(ctx, tool, fixture_path) for tool in candidates]
     finally:

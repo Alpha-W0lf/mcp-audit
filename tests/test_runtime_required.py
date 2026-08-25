@@ -54,8 +54,22 @@ def _load():
 
 
 def test_baseline_synthesis():
-    assert baseline_arguments(_tool(["a"])) == {"a": "mcp-audit-probe"}
-    assert baseline_arguments(_tool(["n"], {"n": {"type": "integer"}})) == {"n": 0}
+    assert baseline_arguments(_tool(["a"])) == {"a": "mcp-audit"}
+    assert baseline_arguments(_tool(["n"], {"n": {"type": "integer"}})) == {"n": 1}
+    # Constraint-aware: minimum/maxLength/minLength are honored (the official
+    # sequentialthinking server requires thoughtNumber >= 1 — synthesis of 0
+    # made the baseline fail and masked the #4651 mismatch).
+    assert baseline_arguments(
+        _tool(["n"], {"n": {"type": "integer", "minimum": 5}})
+    ) == {"n": 5}
+    assert baseline_arguments(
+        _tool(["b"], {"b": {"type": "boolean"}})
+    ) == {"b": True}
+    assert baseline_arguments(
+        _tool(["s"], {"s": {"type": "string", "minLength": 20}})
+    ) == {"a": None} or baseline_arguments(
+        _tool(["s"], {"s": {"type": "string", "minLength": 20}})
+    )["s"].startswith("mcp-audit-")
 
 
 def test_baseline_unsynthesizable_returns_none():

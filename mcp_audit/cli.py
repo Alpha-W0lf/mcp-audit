@@ -11,6 +11,7 @@ import asyncio
 import shlex
 import sys
 import traceback
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -128,6 +129,7 @@ async def run_checks(
             tools=handle.tools,
             allow_destructive=allow_destructive,
             call_timeout=call_timeout,
+            extra={"sandbox_roots": [Path(a) for a in command[1:] if not a.startswith("-")]},
         )
         for spec in specs:
             try:
