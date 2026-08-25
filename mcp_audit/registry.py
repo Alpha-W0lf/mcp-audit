@@ -22,7 +22,7 @@ CheckFn = Callable[["CheckContext"], Awaitable[CheckResult | list[CheckResult] |
 
 _ID_RE = re.compile(r"^[A-Z][A-Z0-9_]*\d+$")
 
-VALID_SCOPES = ("schema", "runtime")
+VALID_SCOPES = ("schema", "runtime", "encoding", "path_safety")
 
 
 class RegistryError(Exception):

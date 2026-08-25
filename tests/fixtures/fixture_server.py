@@ -13,9 +13,15 @@ Three read-only tools, each exhibiting a distinct conformance failure class:
   `beta` (not in required) -> runtime stricter than advertised -> ERROR,
   exit code 1.
 
-Also carries stubs for future checks:
-- mojibake_read   — returns UTF-8-replacement-mangled content at a chunk
-  boundary (TODO: ENCODING001, servers#4666).
+Also carries:
+- read_head        — reads the file at `path`, takes the first `head` BYTES,
+  and decodes each aligned 1024-byte chunk independently with
+  errors="replace": multi-byte UTF-8 straddling a chunk boundary becomes
+  U+FFFD mojibake (ENCODING001, servers#4666 — must FAIL).
+- read_head_safe   — same contract implemented correctly: decode the complete
+  buffer once, then slice. ENCODING001 must PASS it.
+- mojibake_read    — legacy canned stub returning replacement-mangled content
+  regardless of arguments; ENCODING001 flags it too.
 - drive_letter_create — accepts Windows drive-letter paths on POSIX and
   "creates" them as literal filenames; annotated readOnlyHint=false so the
   safety gate skips it unless --allow-destructive (TODO: PATHSAFE001,
@@ -25,6 +31,8 @@ Built on the mcp SDK 2.x low-level API (constructor-registered handlers).
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import anyio
 from mcp import types
@@ -80,7 +88,37 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
                 },
                 annotations=types.ToolAnnotations(read_only_hint=True),
             ),
-            # TODO(ENCODING001): assert this tool's output is valid UTF-8 (#4666).
+            # ENCODING001 (#4666): real chunked-decode corruption below.
+            types.Tool(
+                name="read_head",
+                description="First N bytes of a file; decodes each 1024-byte "
+                "chunk independently (corrupts straddling UTF-8).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "head": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["path"],
+                },
+                annotations=types.ToolAnnotations(read_only_hint=True),
+            ),
+            types.Tool(
+                name="read_head_safe",
+                description="First N characters of a file; decode-then-slice "
+                "(boundary-safe).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "head": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["path"],
+                },
+                annotations=types.ToolAnnotations(read_only_hint=True),
+            ),
+            # Legacy canned stub; still probed by ENCODING001 and expected to
+            # fail (returns U+FFFD garbage for any path).
             types.Tool(
                 name="mojibake_read",
                 description="Reads a file chunk boundary; corrupts straddling UTF-8.",
@@ -129,6 +167,29 @@ async def on_call_tool(ctx, params) -> types.CallToolResult:
                 return _error("Invalid arguments: missing required parameter 'beta'")
             return _error("Invalid arguments: missing required parameter 'alpha'")
         return _ok("echoed")
+
+    if params.name == "read_head":
+        # BUG (#4666): fixed-size byte chunks decoded independently — a
+        # multi-byte sequence straddling a 1024-byte boundary becomes U+FFFD.
+        path = arguments.get("path", "")
+        head = arguments.get("head")
+        try:
+            raw = Path(path).read_bytes()
+        except OSError as e:
+            return _error(f"cannot read {path!r}: {e}")
+        data = raw[: int(head)] if head is not None else raw
+        chunks = (data[i : i + 1024] for i in range(0, len(data), 1024))
+        return _ok("".join(c.decode("utf-8", errors="replace") for c in chunks))
+
+    if params.name == "read_head_safe":
+        # Correct implementation: decode the complete buffer once, then slice.
+        path = arguments.get("path", "")
+        head = arguments.get("head")
+        try:
+            text = Path(path).read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            return _error(f"cannot read {path!r}: {e}")
+        return _ok(text[: int(head)] if head is not None else text)
 
     if params.name == "mojibake_read":
         # BUG (#4666): replacement chars where a multi-byte sequence straddled
