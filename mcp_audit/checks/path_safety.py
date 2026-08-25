@@ -206,7 +206,9 @@ async def check_path_safety(ctx: CheckContext) -> list[CheckResult]:
         matches = path_like_properties(tool)
         if not matches:
             continue
-        decision = probe_eligibility(tool, allow_destructive=ctx.allow_destructive)
+        decision = probe_eligibility(
+            tool, allow_destructive=ctx.allow_destructive, allow_tools=ctx.allow_tools
+        )
         if not decision.eligible:
             results.append(
                 _result(

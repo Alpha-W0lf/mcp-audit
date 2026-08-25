@@ -48,6 +48,9 @@ class CheckContext:
     session: ClientSession
     tools: list[AdvertisedTool]
     allow_destructive: bool = False
+    # Per-tool probe consent (--allow-tool): named tools override the
+    # annotation gate; mutually exclusive with allow_destructive at the CLI.
+    allow_tools: tuple[str, ...] = ()
     call_timeout: float = 10.0
     extra: dict[str, Any] = field(default_factory=dict)
 

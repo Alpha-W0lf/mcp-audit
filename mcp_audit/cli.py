@@ -1,8 +1,9 @@
 """CLI entry points: `mcp-audit run` and `mcp-audit list-checks`.
 
 Exit codes (see mcp_audit.models): 0 all pass/skip; 1 any failed check with
-severity=error (failed warnings do NOT trip CI), server startup failure, or
-an unexpected teardown crash; 2 usage error; 130 interrupted (SIGINT).
+severity=error (failed warnings do NOT trip CI unless --strict), server
+startup failure, or an unexpected teardown crash; 2 usage error; 130
+interrupted (SIGINT).
 """
 
 from __future__ import annotations
@@ -79,6 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="probe tools even when annotations say they may be destructive "
         "(use only against sandboxed servers)",
     )
+    p_run.add_argument(
+        "--allow-tool",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="permit runtime probes against this tool even when annotations "
+        "gate it out (repeatable; mutually exclusive with --allow-destructive)",
+    )
+    p_run.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 on failed warnings too (default: only severity=error trips CI)",
+    )
     p_run.add_argument("--json", metavar="PATH", help="write the JSON report here")
     p_run.add_argument(
         "--startup-timeout",
@@ -123,6 +137,8 @@ async def run_checks(
     skip: list[str] | None = None,
     only: list[str] | None = None,
     allow_destructive: bool = False,
+    allow_tools: list[str] | None = None,
+    strict: bool = False,
     startup_timeout: float = 10.0,
     call_timeout: float = 10.0,
     sandbox_roots: list[str] | None = None,
@@ -135,13 +151,14 @@ async def run_checks(
     tokens out of the server command.
     """
     specs = _select_checks(list(skip or []), list(only or []))
-    report = AuditReport(server_command=list(command), tool_version=__version__)
+    report = AuditReport(server_command=list(command), tool_version=__version__, strict=strict)
 
     async with connect(command, startup_timeout=startup_timeout) as handle:
         ctx = CheckContext(
             session=handle.session,
             tools=handle.tools,
             allow_destructive=allow_destructive,
+            allow_tools=tuple(allow_tools or []),
             call_timeout=call_timeout,
             extra={"sandbox_roots": [Path(a) for a in sandbox_roots or []]},
         )
@@ -211,6 +228,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not command:
         print("mcp-audit: --server must not be empty", file=sys.stderr)
         return EXIT_USAGE
+    if args.allow_destructive and args.allow_tool:
+        print(
+            "mcp-audit: --allow-tool and --allow-destructive are mutually exclusive "
+            "(per-tool consent is the granular alternative to the global override)",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
 
     load_checks()
     unknown = _unknown_ids(list(args.skip), list(args.only))
@@ -229,6 +253,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 skip=args.skip,
                 only=args.only,
                 allow_destructive=args.allow_destructive,
+                allow_tools=list(args.allow_tool),
+                strict=args.strict,
                 startup_timeout=args.startup_timeout,
                 call_timeout=args.call_timeout,
                 sandbox_roots=list(args.arg),

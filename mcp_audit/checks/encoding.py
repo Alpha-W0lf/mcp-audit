@@ -221,7 +221,9 @@ def _result(
 
 
 async def _probe_tool(ctx: CheckContext, tool: Any, fixture_path: str) -> CheckResult:
-    decision = probe_eligibility(tool, allow_destructive=ctx.allow_destructive)
+    decision = probe_eligibility(
+        tool, allow_destructive=ctx.allow_destructive, allow_tools=ctx.allow_tools
+    )
     if not decision.eligible:
         return _result(
             "skip",

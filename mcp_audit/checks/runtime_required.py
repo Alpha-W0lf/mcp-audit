@@ -9,7 +9,10 @@ Protocol per probe-eligible tool that advertises >= 1 required field:
 1. Build a baseline argument set by synthesizing values from each required
    property's declared type; call the tool with all required fields present.
    If the baseline itself fails, mark the tool skip (we cannot distinguish
-   schema drift from a generally-broken tool).
+   schema drift from a generally-broken tool). String `pattern` constraints
+   are honored during synthesis (see _synthesize_pattern_string): a field
+   whose pattern admits no candidate is unsynthesizable, so the baseline is
+   skipped rather than probing with a value the server will reject.
 2. For each required field F, call again omitting exactly F:
    - call SUCCEEDS            -> schema stricter than runtime  -> warning
                                  (harmless direction: clients sending F work)
@@ -21,8 +24,9 @@ Protocol per probe-eligible tool that advertises >= 1 required field:
    - unparseable/other error  -> inconclusive; recorded in details only
 
 Safety: this check CALLS tools. It runs only on tools whose server-asserted
-annotations claim readOnlyHint=true (see mcp_audit.safety), or when the
-operator passes --allow-destructive. Annotations are hints, not guarantees.
+annotations claim readOnlyHint=true (see mcp_audit.safety), on tools named
+via --allow-tool, or everywhere when the operator passes --allow-destructive.
+Annotations are hints, not guarantees.
 """
 
 from __future__ import annotations
@@ -61,9 +65,55 @@ def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
     return value
 
 
-def _synthesize_string(prop_spec: dict[str, Any]) -> Any:
-    """String synthesis honoring minLength; best-effort for patterns."""
+# Simple literal prefix after an opening `^` anchor — deliberately stops at
+# the first regex metacharacter, so `^thought-` yields `thought-` but
+# `^[a-z]+$` yields nothing.
+_LITERAL_PREFIX_RE = re.compile(r"^\^([A-Za-z0-9][A-Za-z0-9 _-]*)")
+
+
+def _literal_prefix(pattern: str) -> str | None:
+    m = _LITERAL_PREFIX_RE.match(pattern)
+    return m.group(1) if m else None
+
+
+def _synthesize_pattern_string(
+    pattern: str, field_name: str | None, min_len: Any, max_len: Any
+) -> Any:
+    """Synthesize a value for a regex-`pattern`-constrained string field.
+
+    JSON Schema `pattern` is unanchored (search semantics), so candidates are
+    accepted iff `re.search` matches. Candidates, in order: the field name
+    itself, "mcp-audit", and a value derived from a simple literal prefix in
+    the pattern (e.g. `^thought-` -> "thought-mcp-audit"). If none satisfy
+    the pattern and length bounds, the field is unsynthesizable — the
+    baseline is skipped rather than sending a value the server will reject.
+    """
+    try:
+        rx = re.compile(pattern)
+    except re.error:
+        return _SENTINEL_UNSYNTHESIZABLE
+    candidates: list[str] = []
+    if field_name:
+        candidates.append(field_name)
+    candidates.append("mcp-audit")
+    if prefix := _literal_prefix(pattern):
+        candidates.append(prefix + "mcp-audit")
+    for candidate in candidates:
+        if len(candidate) < min_len:
+            continue
+        if isinstance(max_len, int) and max_len >= 0 and len(candidate) > max_len:
+            continue
+        if rx.search(candidate):
+            return candidate
+    return _SENTINEL_UNSYNTHESIZABLE
+
+
+def _synthesize_string(prop_spec: dict[str, Any], field_name: str | None = None) -> Any:
+    """String synthesis honoring minLength/maxLength and regex `pattern`."""
     min_len = prop_spec.get("minLength") or 0
+    pattern = prop_spec.get("pattern")
+    if isinstance(pattern, str) and pattern:
+        return _synthesize_pattern_string(pattern, field_name, min_len, prop_spec.get("maxLength"))
     candidate = _SYNTHESIZED_STRING
     if len(candidate) < min_len:
         candidate = (candidate + "-") * (min_len // len(candidate) + 1)
@@ -77,7 +127,7 @@ def _synthesize_string(prop_spec: dict[str, Any]) -> Any:
     return candidate
 
 
-def _synthesize(prop_spec: dict[str, Any]) -> Any:
+def _synthesize(prop_spec: dict[str, Any], field_name: str | None = None) -> Any:
     if not isinstance(prop_spec, dict):
         return _SENTINEL_UNSYNTHESIZABLE
     if "default" in prop_spec:
@@ -104,7 +154,7 @@ def _synthesize(prop_spec: dict[str, Any]) -> Any:
     if ptype == "boolean":
         return True
     if ptype == "string":
-        return _synthesize_string(prop_spec)
+        return _synthesize_string(prop_spec, field_name=field_name)
     if ptype == "array":
         min_items = prop_spec.get("minItems") or 0
         if min_items == 0:
@@ -136,7 +186,7 @@ def baseline_arguments(tool: AdvertisedTool) -> dict[str, Any] | None:
     args: dict[str, Any] = {}
     for field_name in tool.required_fields:
         spec = props.get(field_name)
-        value = _synthesize(spec if isinstance(spec, dict) else {})
+        value = _synthesize(spec if isinstance(spec, dict) else {}, field_name=field_name)
         if value is _SENTINEL_UNSYNTHESIZABLE:
             return None
         args[field_name] = value
@@ -169,7 +219,9 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
     results: list[CheckResult] = []
 
     for tool in ctx.tools:
-        decision = probe_eligibility(tool, allow_destructive=ctx.allow_destructive)
+        decision = probe_eligibility(
+            tool, allow_destructive=ctx.allow_destructive, allow_tools=ctx.allow_tools
+        )
         if not decision.eligible:
             results.append(
                 CheckResult(
