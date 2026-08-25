@@ -69,17 +69,20 @@ class TestExitCodes:
 
 
 class TestRegistry:
-    def test_load_checks_registers_builtins(self):
+    def test_load_checks_registers_exact_builtin_set(self):
         load_checks()
-        assert set(REGISTRY.ids()) >= {"SCHEMA001", "RUNTIME001"}
+        assert set(REGISTRY.ids()) == {
+            "SCHEMA001",
+            "RUNTIME001",
+            "ENCODING001",
+            "PATHSAFE001",
+        }
 
     def test_duplicate_ids_rejected(self):
         from mcp_audit.registry import CheckRegistry
 
         reg = CheckRegistry()
-        deco = reg.register(
-            id="TEST001", severity="error", citation=None, scope="schema"
-        )
+        deco = reg.register(id="TEST001", severity="error", citation=None, scope="schema")
 
         async def fn(ctx):  # pragma: no cover
             return None
@@ -93,9 +96,7 @@ class TestRegistry:
 
         reg = CheckRegistry()
         with pytest.raises(RegistryError, match="stable-ID"):
-            reg.register(
-                id="schema-one", severity="error", citation=None, scope="schema"
-            )
+            reg.register(id="schema-one", severity="error", citation=None, scope="schema")
 
     def test_unknown_id_lookup_lists_known(self):
         load_checks()
@@ -105,9 +106,7 @@ class TestRegistry:
 
 class TestSafetyGate:
     def _tool(self, annotations: dict | None) -> AdvertisedTool:
-        return AdvertisedTool(
-            name="t", description=None, input_schema={}, annotations=annotations
-        )
+        return AdvertisedTool(name="t", description=None, input_schema={}, annotations=annotations)
 
     def test_read_only_true_is_eligible(self):
         d = probe_eligibility(self._tool({"readOnlyHint": True}))
@@ -118,9 +117,7 @@ class TestSafetyGate:
         assert not d.eligible
 
     def test_destructive_skipped(self):
-        d = probe_eligibility(
-            self._tool({"readOnlyHint": False, "destructiveHint": True})
-        )
+        d = probe_eligibility(self._tool({"readOnlyHint": False, "destructiveHint": True}))
         assert not d.eligible and d.outcome == "destructive_hint_true"
 
     def test_unannotated_defaults_to_ineligible(self):
@@ -129,9 +126,7 @@ class TestSafetyGate:
 
     def test_destructive_with_read_only_true_still_eligible(self):
         # MCP spec: destructiveHint only has meaning when readOnlyHint==false
-        d = probe_eligibility(
-            self._tool({"readOnlyHint": True, "destructiveHint": True})
-        )
+        d = probe_eligibility(self._tool({"readOnlyHint": True, "destructiveHint": True}))
         assert d.eligible
 
     def test_allow_destructive_overrides_everything(self):

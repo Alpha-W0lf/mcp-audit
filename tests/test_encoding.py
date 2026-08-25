@@ -6,9 +6,10 @@ Layers, mirroring test_runtime_required.py conventions:
   when chunk-decoded at 1024/2048 independently, yet stay valid UTF-8 whole.
 - Check-branch tests against a FakeSession replaying buggy/correct readers,
   the annotation gate, error degradation, and no-candidate discovery.
-- Inline integration: spawn the bundled buggy fixture server subprocess and
-  assert ENCODING001 fails `read_head` by name while `read_head_safe` passes;
-  spawn echo_server and assert the no-file-reader skip.
+- Integration (marked `integration`, deselect with `-m "not integration"`):
+  spawn the bundled buggy fixture server subprocess and assert ENCODING001
+  fails `read_head` by name while `read_head_safe` passes; spawn echo_server
+  and assert the no-file-reader skip.
 """
 
 import sys
@@ -122,9 +123,7 @@ def test_correct_decode_then_slice_keeps_marker_intact():
 def test_path_argument_discovery():
     assert find_path_argument(_tool()) == "path"
     assert (
-        find_path_argument(
-            _tool({"file_path": {"type": "string"}, "head": {"type": "integer"}})
-        )
+        find_path_argument(_tool({"file_path": {"type": "string"}, "head": {"type": "integer"}}))
         == "file_path"
     )
     assert find_path_argument(_tool({"text": {"type": "string"}})) is None
@@ -298,6 +297,7 @@ async def test_extra_required_fields_skip_probe():
 # --- integration: real subprocess servers -------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_buggy_fixture_server_read_head_fails_safe_passes():
     async with connect([sys.executable, str(BUGGY_SERVER)]) as handle:
@@ -329,6 +329,7 @@ async def test_buggy_fixture_server_read_head_fails_safe_passes():
     assert "hidden_beta" not in by_tool
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_echo_server_yields_single_no_candidate_skip():
     async with connect([sys.executable, str(ECHO_SERVER)]) as handle:

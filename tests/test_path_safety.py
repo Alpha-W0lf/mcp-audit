@@ -51,9 +51,7 @@ class FakeSession:
         )
 
 
-def _tool(
-    props=None, required=None, annotations=None, name="write_file"
-) -> AdvertisedTool:
+def _tool(props=None, required=None, annotations=None, name="write_file") -> AdvertisedTool:
     props = props if props is not None else {"path": {"type": "string"}}
     return AdvertisedTool(
         name=name,
@@ -134,9 +132,7 @@ def test_path_property_detected():
 
 
 def test_profile_is_not_path_like():
-    assert (
-        path_like_properties(_tool({"profile": {"type": "string"}}, ["profile"])) == []
-    )
+    assert path_like_properties(_tool({"profile": {"type": "string"}}, ["profile"])) == []
 
 
 def test_camel_case_and_variants_detected():
@@ -179,12 +175,50 @@ async def test_conformant_rejection_passes():
 @pytest.mark.asyncio
 async def test_unrelated_error_skips():
     session = FakeSession(lambda args: (False, "connection reset by peer"))
-    results = await REGISTRY.get("PATHSAFE001").fn(
-        _ctx(session, [_tool()], allow_destructive=True)
-    )
+    results = await REGISTRY.get("PATHSAFE001").fn(_ctx(session, [_tool()], allow_destructive=True))
     r = _single(results)
     assert r.status == "skip"
     assert r.details["skip_reason"] == "unattributable_error"
+
+
+@pytest.mark.asyncio
+async def test_error_echoing_probe_value_without_rejection_vocab_skips():
+    """Overclaim trap: an unrelated error that merely echoes the probe value
+    must NOT score PASS (no rejection vocabulary, no corroboration)."""
+    session = FakeSession(
+        lambda args: (False, f"cannot process {args.get('path')}: disk quota full")
+    )
+    results = await REGISTRY.get("PATHSAFE001").fn(_ctx(session, [_tool()], allow_destructive=True))
+    r = _single(results)
+    assert r.status == "skip"
+    assert r.details["skip_reason"] == "unattributable_error"
+
+
+@pytest.mark.asyncio
+async def test_rejection_vocab_but_file_created_skips_and_cleans_up(tmp_path):
+    """A 'rejection' that still materialized the probe file is not
+    corroborated: score SKIP (never crash) and remove the artifact."""
+
+    def behavior(args):
+        if args.get("path") == PROBE_VALUE:
+            (tmp_path / PROBE_VALUE).write_text("sneaky write", encoding="utf-8")
+            return False, f"invalid path rejected: {PROBE_VALUE}"
+        return True, "ok"
+
+    literal = tmp_path / PROBE_VALUE
+    results = await REGISTRY.get("PATHSAFE001").fn(
+        _ctx(
+            FakeSession(behavior),
+            [_tool()],
+            allow_destructive=True,
+            extra={"sandbox_roots": [tmp_path]},
+        )
+    )
+    r = _single(results)
+    assert r.status == "skip"
+    assert r.details["skip_reason"] == "rejection_not_corroborated"
+    assert r.details["cleanup"] == "removed"
+    assert not literal.exists()
 
 
 @pytest.mark.asyncio
@@ -199,9 +233,7 @@ async def test_write_probe_requires_destructive_allowance():
 @pytest.mark.asyncio
 async def test_no_path_tools_skips():
     session = FakeSession(lambda args: (True, ""))
-    results = await REGISTRY.get("PATHSAFE001").fn(
-        _ctx(session, [], allow_destructive=True)
-    )
+    results = await REGISTRY.get("PATHSAFE001").fn(_ctx(session, [], allow_destructive=True))
     r = _single(results)
     assert r.status == "skip"
     assert "no tools" in r.message
@@ -232,9 +264,7 @@ async def test_fixture_drive_letter_tool_fails_under_allow_destructive():
 @pytest.mark.asyncio
 async def test_fixture_drive_letter_tool_skipped_without_flag():
     async with connect([sys.executable, str(FIXTURE)]) as handle:
-        results = await REGISTRY.get("PATHSAFE001").fn(
-            _ctx(handle.session, handle.tools)
-        )
+        results = await REGISTRY.get("PATHSAFE001").fn(_ctx(handle.session, handle.tools))
 
     by_tool = {r.tool_name: r for r in results}
     skipped = by_tool["drive_letter_create"]

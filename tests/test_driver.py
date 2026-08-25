@@ -1,8 +1,13 @@
-"""Driver hardening tests: startup timeout, early-death detection, stderr capture."""
+"""Driver hardening tests: startup timeout, early-death detection, stderr capture.
+
+Marked integration: these tests spawn real subprocesses.
+"""
 
 import pytest
 
 from mcp_audit.driver import ServerStartupError, connect
+
+pytestmark = pytest.mark.integration
 
 SLOW_SERVER = ["sleep", "30"]  # never speaks MCP -> initialize must time out
 DEAD_SERVER = ["/bin/sh", "-c", "echo 'boom from stderr' >&2; exit 7"]

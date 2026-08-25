@@ -59,17 +59,13 @@ def test_baseline_synthesis():
     # Constraint-aware: minimum/maxLength/minLength are honored (the official
     # sequentialthinking server requires thoughtNumber >= 1 — synthesis of 0
     # made the baseline fail and masked the #4651 mismatch).
-    assert baseline_arguments(
-        _tool(["n"], {"n": {"type": "integer", "minimum": 5}})
-    ) == {"n": 5}
-    assert baseline_arguments(
-        _tool(["b"], {"b": {"type": "boolean"}})
-    ) == {"b": True}
-    assert baseline_arguments(
-        _tool(["s"], {"s": {"type": "string", "minLength": 20}})
-    ) == {"a": None} or baseline_arguments(
-        _tool(["s"], {"s": {"type": "string", "minLength": 20}})
-    )["s"].startswith("mcp-audit-")
+    assert baseline_arguments(_tool(["n"], {"n": {"type": "integer", "minimum": 5}})) == {"n": 5}
+    assert baseline_arguments(_tool(["b"], {"b": {"type": "boolean"}})) == {"b": True}
+    assert baseline_arguments(_tool(["s"], {"s": {"type": "string", "minLength": 20}})) == {
+        "a": None
+    } or baseline_arguments(_tool(["s"], {"s": {"type": "string", "minLength": 20}}))[
+        "s"
+    ].startswith("mcp-audit-")
 
 
 def test_baseline_unsynthesizable_returns_none():
@@ -173,8 +169,6 @@ async def test_unannotated_tool_skipped_without_flag():
     assert r.status == "skip"
     assert r.details["skip_reason"] == "no_read_only_hint_asserted"
 
-    forced = await REGISTRY.get("RUNTIME001").fn(
-        _ctx(session, [t], allow_destructive=True)
-    )
+    forced = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t], allow_destructive=True))
     rf = _result_for(forced, "quiet")
     assert rf.status == "fail" and rf.severity == "warning"

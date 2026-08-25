@@ -16,15 +16,11 @@ from mcp.server.stdio import stdio_server
 
 
 def _error(msg: str) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=msg)], is_error=True
-    )
+    return types.CallToolResult(content=[types.TextContent(type="text", text=msg)], is_error=True)
 
 
 def _ok(msg: str) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=msg)], is_error=False
-    )
+    return types.CallToolResult(content=[types.TextContent(type="text", text=msg)], is_error=False)
 
 
 async def on_list_tools(ctx, params) -> types.ListToolsResult:

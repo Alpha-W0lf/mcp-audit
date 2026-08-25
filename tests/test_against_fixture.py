@@ -5,16 +5,17 @@ Skipped unless MCP_FIXTURE_SERVER names a runnable fixture command, e.g.:
     export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
     pytest -m integration
 
-Asserts for v0.2 scope (RUNTIME001 only):
+Coverage (v0.3):
 
-- strict_echo   -> RUNTIME001 passes (conformant rejection)
-- loose_required-> RUNTIME001 fails with severity=warning (schema stricter)
-- hidden_beta   -> RUNTIME001 fails with severity=error (runtime stricter);
-                  overall CLI/report exit code is 1.
-
-TODO(v0.3): once ENCODING001 exists, assert it fails on `mojibake_read`
-(#4666). TODO(v0.4): once PATHSAFE001 exists, assert it fails on
-`drive_letter_create` when --allow-destructive is passed (#4686).
+- RUNTIME001 (dogfooded here):
+  - strict_echo   -> passes (conformant rejection)
+  - loose_required-> fails with severity=warning (schema stricter)
+  - hidden_beta   -> fails with severity=error (runtime stricter);
+                    overall CLI/report exit code is 1.
+- ENCODING001 is covered by its own integration tests in test_encoding.py
+  (fails `read_head` and `mojibake_read`, passes `read_head_safe`) (#4666).
+- PATHSAFE001 is covered by its own integration tests in test_path_safety.py
+  (fails `drive_letter_create` under --allow-destructive) (#4686).
 """
 
 import json
@@ -51,9 +52,7 @@ def _run(command: str, *extra: str, json_path=None) -> dict | int:
 def test_runtime001_fails_on_loose_schema_tool(fixture_command, tmp_path):
     """The spec's headline assertion: RUNTIME001 flags the loose-schema tool."""
     report = _run(fixture_command, json_path=tmp_path / "r.json")
-    by_tool = {
-        r["tool_name"]: r for r in report["results"] if r["check_id"] == "RUNTIME001"
-    }
+    by_tool = {r["tool_name"]: r for r in report["results"] if r["check_id"] == "RUNTIME001"}
 
     assert by_tool["strict_echo"]["status"] == "pass"
     loose = by_tool["loose_required"]
@@ -65,7 +64,3 @@ def test_runtime001_fails_on_loose_schema_tool(fixture_command, tmp_path):
 
     # error-severity failure trips the CI exit code; warnings do not
     assert report["exit_code"] == 1
-
-    # TODO(ENCODING001): assert encoding check fails on mojibake_read (#4666).
-    # TODO(PATHSAFE001): assert path-safety check fails on drive_letter_create
-    # under --allow-destructive (#4686); without the flag it must be skipped.

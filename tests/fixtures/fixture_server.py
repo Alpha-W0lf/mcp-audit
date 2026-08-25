@@ -24,8 +24,8 @@ Also carries:
   regardless of arguments; ENCODING001 flags it too.
 - drive_letter_create — accepts Windows drive-letter paths on POSIX and
   "creates" them as literal filenames; annotated readOnlyHint=false so the
-  safety gate skips it unless --allow-destructive (TODO: PATHSAFE001,
-  servers#4686).
+  safety gate skips it unless --allow-destructive (PATHSAFE001, servers#4686
+  — must FAIL under --allow-destructive).
 
 Built on the mcp SDK 2.x low-level API (constructor-registered handlers).
 """
@@ -41,15 +41,11 @@ from mcp.server.stdio import stdio_server
 
 
 def _error(msg: str) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=msg)], is_error=True
-    )
+    return types.CallToolResult(content=[types.TextContent(type="text", text=msg)], is_error=True)
 
 
 def _ok(msg: str) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=msg)], is_error=False
-    )
+    return types.CallToolResult(content=[types.TextContent(type="text", text=msg)], is_error=False)
 
 
 async def on_list_tools(ctx, params) -> types.ListToolsResult:
@@ -105,8 +101,7 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
             ),
             types.Tool(
                 name="read_head_safe",
-                description="First N characters of a file; decode-then-slice "
-                "(boundary-safe).",
+                description="First N characters of a file; decode-then-slice (boundary-safe).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -129,8 +124,8 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
                 },
                 annotations=types.ToolAnnotations(read_only_hint=True),
             ),
-            # TODO(PATHSAFE001): assert rejection of drive-letter paths on POSIX
-            # (#4686); gated behind readOnlyHint=false + --allow-destructive.
+            # PATHSAFE001 (#4686): drive-letter acceptance on POSIX; gated
+            # behind readOnlyHint=false + --allow-destructive.
             types.Tool(
                 name="drive_letter_create",
                 description="Creates files; silently accepts C:\\ style paths on POSIX.",
@@ -139,9 +134,7 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
                     "properties": {"path": {"type": "string"}},
                     "required": ["path"],
                 },
-                annotations=types.ToolAnnotations(
-                    read_only_hint=False, destructive_hint=True
-                ),
+                annotations=types.ToolAnnotations(read_only_hint=False, destructive_hint=True),
             ),
         ]
     )
