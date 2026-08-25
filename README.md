@@ -71,6 +71,13 @@ only source of *sandbox roots* (the server's allowed directories) used to
 place encoding fixtures and corroborate path-safety findings — mcp-audit
 never guesses roots out of the server command itself.
 
+`--allow-destructive` additionally opts in to baseline probes on write-shaped
+tools. Such a probe calls the tool once with synthesized arguments
+(recognizably named `mcp-audit-probe`), and a server that writes may create a
+server-side artifact with that name inside its allowed root. This is by
+design and operator-consented — run it only against sandboxed servers, and
+delete any `mcp-audit-probe` artifact afterwards if the server persists it.
+
 Exit codes:
 
 | Code | Meaning |

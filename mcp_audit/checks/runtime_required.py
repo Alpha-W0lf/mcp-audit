@@ -64,7 +64,7 @@ def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
 def _synthesize_string(prop_spec: dict[str, Any]) -> Any:
     """String synthesis honoring minLength; best-effort for patterns."""
     min_len = prop_spec.get("minLength") or 0
-    candidate = "mcp-audit"
+    candidate = _SYNTHESIZED_STRING
     if len(candidate) < min_len:
         candidate = (candidate + "-") * (min_len // len(candidate) + 1)
         candidate = candidate[: max(min_len, 1)]
@@ -240,7 +240,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                         ),
                         citation=CITATION_4651,
                         tool_name=tool.name,
-                        details={"baseline_error": msg[:2000]},
+                        details={"baseline_error": msg[:MAX_ERROR_TEXT]},
                     )
                 )
             else:

@@ -54,7 +54,7 @@ def _load():
 
 
 def test_baseline_synthesis():
-    assert baseline_arguments(_tool(["a"])) == {"a": "mcp-audit"}
+    assert baseline_arguments(_tool(["a"])) == {"a": "mcp-audit-probe"}
     assert baseline_arguments(_tool(["n"], {"n": {"type": "integer"}})) == {"n": 1}
     # Constraint-aware: minimum/maxLength/minLength are honored (the official
     # sequentialthinking server requires thoughtNumber >= 1 — synthesis of 0
