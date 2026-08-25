@@ -1,14 +1,15 @@
 [project]
 name = "mcp-audit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Conformance test kit for MCP servers — schema, encoding, and path-safety checks seeded by real upstream bugs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 license-files = ["LICENSE"]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=2.0.0",
     "rich>=13.0",
+    "typing_extensions; python_version < \"3.12\"",
 ]
 
 [project.optional-dependencies]
@@ -28,11 +29,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["mcp_audit"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "BLE", "SIM"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
-    "integration: requires a runnable fixture server via MCP_FIXTURE_SERVER env var",
+    "integration: spawns real server subprocesses; the dogfood suite additionally requires the MCP_FIXTURE_SERVER env var",
 ]
 asyncio_mode = "auto"
 
