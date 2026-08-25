@@ -32,6 +32,11 @@ from mcp_audit.registry import REGISTRY, CheckContext, CheckSpec, load_checks
 
 console = Console()
 
+# Message column truncation in the results table: messages longer than
+# _MAX_MESSAGE_COL are cut at _MAX_MESSAGE_COL - len("...") and ellipsized.
+_MAX_MESSAGE_COL = 120
+_TRUNCATED_MESSAGE_COL = _MAX_MESSAGE_COL - 3
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -180,7 +185,9 @@ def render_report(report: AuditReport) -> None:
             r.severity,
             f"[{style_for_status[r.status]}]{r.status}[/]",
             r.tool_name or "—",
-            r.message if len(r.message) <= 120 else r.message[:117] + "...",
+            r.message
+            if len(r.message) <= _MAX_MESSAGE_COL
+            else r.message[:_TRUNCATED_MESSAGE_COL] + "...",
         )
     console.print(table)
 

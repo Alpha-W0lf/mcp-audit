@@ -36,6 +36,10 @@ EXIT_CHECKS_FAILED = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130  # 128 + SIGINT
 
+# Cap on server error/result text recorded into CheckResult.details — enough
+# for diagnosis, bounded so a chatty server cannot bloat the JSON report.
+MAX_ERROR_TEXT = 2000
+
 
 @dataclass(frozen=True)
 class CheckResult:

@@ -31,11 +31,17 @@ import re
 from typing import Any
 
 from mcp_audit.driver import AdvertisedTool, call_tool_normalized
-from mcp_audit.models import CheckResult, Severity, Status
+from mcp_audit.models import MAX_ERROR_TEXT, CheckResult, Severity, Status
 from mcp_audit.registry import CheckContext, check
 from mcp_audit.safety import probe_eligibility
 
 CITATION_4651 = "https://github.com/modelcontextprotocol/servers/issues/4651"
+
+# Recognizable synthesized string value: under --allow-destructive, a
+# baseline probe on a write-shaped tool may materialize a server-side
+# artifact named after it inside the server's allowed root (by design;
+# operator-consented — see README).
+_SYNTHESIZED_STRING = "mcp-audit-probe"
 
 
 def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
@@ -249,7 +255,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                         ),
                         citation=CITATION_4651,
                         tool_name=tool.name,
-                        details={"baseline_error": msg[:2000]},
+                        details={"baseline_error": msg[:MAX_ERROR_TEXT]},
                     )
                 )
             continue
@@ -274,7 +280,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                 + [p for p in tool.input_schema.get("properties", {}) if p not in required],
             )
             if mentioned is None:
-                inconclusive.append({"omitted": omitted, "error": msg[:2000]})
+                inconclusive.append({"omitted": omitted, "error": msg[:MAX_ERROR_TEXT]})
             elif mentioned == omitted:
                 continue  # conformant rejection of an advertised-required field
             elif mentioned in required:
@@ -284,7 +290,7 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                 inconclusive.append(
                     {
                         "omitted": omitted,
-                        "error": msg[:2000],
+                        "error": msg[:MAX_ERROR_TEXT],
                         "note": f"error names another required field {mentioned!r}",
                     }
                 )
