@@ -186,8 +186,8 @@ async def on_call_tool(ctx, params) -> types.CallToolResult:
 
     if params.name == "mojibake_read":
         # BUG (#4666): replacement chars where a multi-byte sequence straddled
-        # the 1024-byte boundary.
-        return _ok("line1\n\ufffd\ufffd broken sequence \ufffd")
+        # the 1024-byte boundary of the (padding-heavy) fixture text.
+        return _ok("a" * 1100 + "\ufffd\ufffd broken sequence \ufffd")
 
     if params.name == "drive_letter_create":
         path = arguments.get("path", "")

@@ -203,7 +203,8 @@ async def test_whole_file_read_probes_all_boundaries_without_limit_param():
 
     def canned_buggy(args):
         captured["args"] = args
-        return True, "\ufffd broken"
+        # fixture text (padding run) with replacement-mangled markers
+        return True, "a" * 1100 + "\ufffd broken"
 
     session = FakeSession(canned_buggy)
     tool = _tool()  # no integer limit property -> single full-read probe
@@ -257,7 +258,7 @@ async def test_destructive_file_tool_skipped_by_safety_gate():
 
 @pytest.mark.asyncio
 async def test_allow_destructive_overrides_gate_and_probes():
-    session = FakeSession(lambda args: (True, MARKER))
+    session = FakeSession(lambda args: (True, boundary_fixture().decode("utf-8")))
     tool = _tool(annotations={"readOnlyHint": False})
     results = await _run(session, [tool], allow_destructive=True)
     assert results[0].status == "pass"
@@ -292,6 +293,52 @@ async def test_extra_required_fields_skip_probe():
     assert r.status == "skip"
     assert session.calls == []  # nothing was called
     assert "mode" in r.message
+
+
+# --- fixture-text gating (false-positive class: metadata / non-text responses)
+
+
+@pytest.mark.asyncio
+async def test_metadata_only_response_skips_not_fails():
+    """get_file_info shape: file stats, zero content — not a decoding surface."""
+    session = FakeSession(
+        lambda args: (True, "size: 2081\ncreated: 2024-01-01\nmodified: 2024-06-01")
+    )
+    results = await _run(session, [_tool()])
+    r = results[0]
+    assert r.status == "skip"
+    assert "not a decoding surface" in r.message
+
+
+@pytest.mark.asyncio
+async def test_embedded_resource_response_skips_not_fails():
+    """read_media_file shape: base64 blob flattened by call normalization."""
+    session = FakeSession(lambda args: (True, "<EmbeddedResource>"))
+    results = await _run(session, [_tool()])
+    r = results[0]
+    assert r.status == "skip"
+    assert "not a decoding surface" in r.message
+
+
+@pytest.mark.asyncio
+async def test_fixture_text_with_replacement_chars_fails():
+    """Padding run present + U+FFFD -> true corruption on a decoding surface."""
+    session = FakeSession(lambda args: (True, "a" * 1100 + "\ufffd mangled"))
+    results = await _run(session, [_tool()])
+    r = results[0]
+    assert r.status == "fail" and r.severity == "error"
+    assert "U+FFFD" in r.message
+
+
+@pytest.mark.asyncio
+async def test_fixture_text_with_marker_intact_passes():
+    """Padding run present + every marker intact -> conformant."""
+    text = boundary_fixture().decode("utf-8")
+    session = FakeSession(lambda args: (True, text))
+    results = await _run(session, [_tool()])
+    r = results[0]
+    assert r.status == "pass"
+    assert "intact" in r.message
 
 
 # --- integration: real subprocess servers -------------------------------------

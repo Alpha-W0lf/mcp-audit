@@ -13,13 +13,25 @@ Protocol per discovered file-reading tool:
 2. Call the tool asking for the head of the file (N=1024, then N=2048 when
    the tool advertises an integer head/count-style parameter); otherwise read
    the whole file once.
-3. Fail if any response contains U+FFFD or is missing/mangling the marker;
-   pass when every probe returns the marker intact.
+3. Fail if any response contains U+FFFD (a true corruption signal), or when
+   the response demonstrably contains fixture text but the marker is
+   missing/mangled; pass when every fixture-bearing probe returns the marker
+   intact; skip when no response contains fixture text.
 
-Detection is deliberately strict: a server that truncates *before* an
-incomplete trailing sequence (byte-exact slicing without replacement) also
-drops the marker and is flagged. The canonical fix for #4666 — decode the
-complete buffer, then slice — keeps the marker intact and passes.
+Fixture-text heuristic: the fixture payload is mostly ``b"a"`` padding, so a
+run of 64+ consecutive 'a' characters in a response proves the server
+returned fixture text — and a missing marker there proves decoding loss.
+Marker ABSENCE in a response without that padding run proves nothing:
+metadata tools (e.g. get_file_info) return file stats rather than content,
+and binary readers (e.g. read_media_file) return base64/embedded-resource
+blobs that were never decoded. Those are not decoding surfaces, so the check
+skips instead of failing them.
+
+Detection is deliberately strict where it applies: a server that truncates
+*before* an incomplete trailing sequence (byte-exact slicing without
+replacement) also drops the marker and is flagged. The canonical fix for
+#4666 — decode the complete buffer, then slice — keeps the marker intact and
+passes.
 
 Safety: read-only probes only. Every candidate goes through the shared
 annotation gate (`mcp_audit.safety`); tools not asserting readOnlyHint=true
@@ -64,6 +76,12 @@ BOUNDARIES: tuple[int, ...] = (1024, 2048)
 
 _FIXTURE_SUFFIX = ".txt"
 _TAIL_PAD_BYTES = 32
+
+# Fixture-text heuristic (see module docstring): the fixture payload is
+# mostly `b"a"` padding, so a run of this many consecutive 'a' characters
+# proves the response contains fixture text.
+_PADDING_RUN_MIN = 64
+_PADDING_RUN_RE = re.compile(f"a{{{_PADDING_RUN_MIN},}}")
 
 # inputSchema heuristics ------------------------------------------------------
 # snake/kebab-boundary aware so "profile"/"manifesto" don't match "file".
@@ -127,9 +145,23 @@ def find_limit_argument(tool: Any) -> str | None:
     return None
 
 
-def _boundary_artifacts(text: str, limit: int | None) -> list[str]:
-    """Human-readable artifacts observed in one probe response."""
+def _contains_fixture_text(text: str) -> bool:
+    """True iff the response demonstrably contains the fixture payload."""
+    return bool(_PADDING_RUN_RE.search(text))
+
+
+def _boundary_artifacts(text: str, limit: int | None) -> tuple[list[str], bool]:
+    """Artifacts observed in one probe response, plus whether the response
+    demonstrably contains fixture text (the padding-run heuristic).
+
+    U+FFFD is reported unconditionally — it is a true corruption signal in
+    any text payload. A missing/mangled marker is reported here too, but the
+    caller only fails on it when fixture text is present; metadata or
+    non-text responses (file stats, base64/embedded-resource blobs) never
+    contained the marker to begin with.
+    """
     artifacts: list[str] = []
+    saw_fixture_text = _contains_fixture_text(text)
     replacements = text.count("\ufffd")
     if replacements:
         artifacts.append(f"{replacements} U+FFFD replacement character(s) in returned content")
@@ -142,22 +174,22 @@ def _boundary_artifacts(text: str, limit: int | None) -> list[str]:
                 f"multi-byte marker {MARKER!r} at byte offset {marker_offset} "
                 f"(straddles the {boundary}-byte boundary) missing or mangled"
             )
-    return artifacts
+    return artifacts, saw_fixture_text
 
 
-def _write_fixture(sandbox_roots: list[str] | None = None) -> str:
+def _write_fixture(sandbox_roots: list[Path] | None = None) -> str:
     """Write the boundary fixture. Prefers the server's sandbox root so the
     file sits inside the server's allowed directories; falls back to system
     temp (probes will then likely be rejected by path validation).
 
-    The audit tool NEVER creates directories: a candidate root is used only
-    when it already exists and is a directory (mirroring the is_dir() filter
-    in mcp_audit.checks.path_safety._sandbox_roots). Fixture names come from
-    tempfile.mkstemp — unpredictable, so a hostile server cannot pre-place a
-    symlink at a guessed path and redirect the write.
+    The audit tool NEVER creates directories: sandbox roots are pre-filtered
+    to existing directories by mcp_audit.registry.sandbox_roots_from_extra.
+    Fixture names come from tempfile.mkstemp — unpredictable, so a hostile
+    server cannot pre-place a symlink at a guessed path and redirect the
+    write.
     """
     payload = boundary_fixture()
-    dirs = [Path(root) for root in sandbox_roots or [] if Path(root).is_dir()]
+    dirs = [Path(root) for root in sandbox_roots or []]
     dirs.append(Path(tempfile.gettempdir()))
     for directory in dirs:
         try:
@@ -218,6 +250,7 @@ async def _probe_tool(ctx: CheckContext, tool: Any, fixture_path: str) -> CheckR
 
     probe_records: list[dict[str, Any]] = []
     artifacts: list[str] = []
+    saw_fixture_text = False
     call_failure: str | None = None
     for limit in probe_limits:
         args: dict[str, Any] = {path_arg: fixture_path}
@@ -231,12 +264,14 @@ async def _probe_tool(ctx: CheckContext, tool: Any, fixture_path: str) -> CheckR
                 else f"probe call failed: {text}"
             )
             break
-        found = _boundary_artifacts(text, limit)
+        found, fixture_text = _boundary_artifacts(text, limit)
+        saw_fixture_text = saw_fixture_text or fixture_text
         probe_records.append(
             {
                 "arguments": args,
                 "requested_boundary": limit,
                 "artifacts": found,
+                "contains_fixture_text": fixture_text,
                 "response_snippet": text[:160],
             }
         )
@@ -246,6 +281,18 @@ async def _probe_tool(ctx: CheckContext, tool: Any, fixture_path: str) -> CheckR
         return _result(
             "skip",
             f"not probed: {call_failure}",
+            tool.name,
+            {"probes": probe_records},
+        )
+
+    if artifacts and not saw_fixture_text:
+        # Marker absence proves nothing when the response never carried
+        # fixture text: metadata replies, base64/embedded-resource blobs, and
+        # short/empty responses are not decoding surfaces.
+        return _result(
+            "skip",
+            f"{tool.name}: response does not contain fixture text "
+            "(metadata or non-text content) — not a decoding surface",
             tool.name,
             {"probes": probe_records},
         )
