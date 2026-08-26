@@ -16,11 +16,11 @@ Every check in this kit is seeded by a real bug found in the wild:
 | Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | Same #4651 bug class, caught dynamically: probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
 | Multi-byte encoding at chunk boundaries | `ENCODING001` | [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) — `headFile`/`tailFile` corrupted UTF-8 sequences straddling 1024-byte read boundaries |
 | Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) — `C:\Users\me\file.md` passed validation and was created as a literal backslash filename inside the sandbox |
-| Citation/path hygiene | *planned* | Owner absolute paths leaking into tool outputs (never ship `/Users/you/...` to clients) |
+| Citation/path hygiene | `HYGIENE001` | Owner absolute paths leaking into tool outputs (never ship `/Users/you/...` to clients) — generalized from the AI-KB MCP work that seeded this project; the canonical rule statement is this table |
 
 ## Status
 
-`v0.4` — all four checks implemented, registered, and dogfooded against real
+`v0.5` — all five checks implemented, registered, and dogfooded against real
 upstream servers:
 
 - **Result model** (`models.py`): every finding is a `CheckResult`
@@ -46,7 +46,9 @@ upstream servers:
   skipped rather than probed with an invalid value.
 - **Strict mode**: `--strict` makes failed warnings trip exit code 1 too —
   for CI pipelines that want zero tolerated findings (default: only
-  severity `error` fails the run).
+  severity `error` fails the run). The serialized JSON report carries a
+  top-level `strict` boolean so downstream tooling can see which policy
+  produced the `exit_code`.
 - **Encoding probe** (`checks/encoding.py`, `ENCODING001`): writes a temp
   fixture whose multi-byte marker straddles 1024/2048-byte chunk boundaries,
   then reads it through each file-reading tool; fails on U+FFFD mojibake or a
@@ -58,13 +60,24 @@ upstream servers:
   corroborated by locating — and deleting — the literal backslash filename in
   the sandbox root. Rejection is only scored PASS when the error reads as
   path validation AND no probe file was created.
+- **Hygiene probe** (`checks/hygiene.py`, `HYGIENE001`): for each
+  probe-eligible tool, makes one benign baseline call (same synthesized
+  arguments as RUNTIME001) and scans the returned text for absolute owner
+  filesystem paths: POSIX homes (`/Users/<name>/`, `/home/<name>/`), Windows
+  user profiles (`C:\Users\<name>\`), and common server-root leaks
+  (`/root/`, `/srv/`, `/opt/`, `/var/www/`). Failure names the tool and the pattern
+  CLASS only — the user-directory segment is masked (`/Users/<redacted>/…`)
+  so the report never re-leaks owner identity into CI logs. Passes when the
+  baseline response is clean; skips per tool when gate-ineligible, when
+  baseline arguments are unsynthesizable, or when the baseline call fails.
+  Citation: the README bug-table row above — the MCP spec defines no
+  path-hygiene conformance rule, so this check cites the project's own
+  statement of the rule it generalizes.
 - **Hardened driver** (`driver.py`): bounded startup (default 10 s) with clear
   errors when a server dies before initialize; server stderr captured
   separately so chatty servers can't corrupt results or reports.
 - **CLI**: `mcp-audit run` / `mcp-audit list-checks`, rich summary tables,
   `--json` machine-readable reports (also emitted on startup failure).
-
-The citation/path-hygiene probe remains specified but unimplemented.
 
 ## Usage
 

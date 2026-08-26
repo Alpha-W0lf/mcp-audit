@@ -3,6 +3,29 @@
 All notable changes to mcp-audit. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses semantic versioning.
 
+## [0.5.0]
+
+### Added
+
+- **HYGIENE001** implemented (new scope `hygiene`): the fourth bug class from
+  the README table — citation/path hygiene. For each probe-eligible tool,
+  makes one benign baseline call (reusing RUNTIME001's baseline argument
+  synthesis) and scans the returned text for absolute owner filesystem paths:
+  POSIX homes (`/Users/<name>/`, `/home/<name>/`), Windows user profiles
+  (`C:\Users\<name>\`), and server-root leaks (`/root/`, `/srv/`, `/opt/`,
+  `/var/www/`). Failures are severity `error` and name the tool plus the
+  pattern CLASS only — the user-directory segment is masked
+  (`/Users/<redacted>/…`) so the report never re-leaks owner identity. Cites
+  the README bug-table row (the MCP spec defines no path-hygiene conformance
+  rule).
+- JSON report now serializes the top-level `strict` boolean (v0.4 added
+  strict to exit-code logic only), so consumers can see which exit policy
+  produced `exit_code`.
+- Fixture server gains `cite_doc` (leaks an absolute owner path in its
+  citation; HYGIENE001 must fail it, masked) and `cite_doc_safe`
+  (source_id-based citation; must pass), dogfooded in
+  `tests/test_against_fixture.py`.
+
 ## [0.4.0]
 
 ### Added

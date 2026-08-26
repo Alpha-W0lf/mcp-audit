@@ -137,6 +137,7 @@ class AuditReport:
                 "timestamp": self.timestamp,
                 "summary": self.summary,
                 "exit_code": self.exit_code,
+                "strict": self.strict,
                 "error": self.error,
                 "results": [r.to_dict() for r in self.results],
             },

@@ -26,6 +26,11 @@ Also carries:
   "creates" them as literal filenames; annotated readOnlyHint=false so the
   safety gate skips it unless --allow-destructive (PATHSAFE001, servers#4686
   — must FAIL under --allow-destructive).
+- cite_doc         — returns a citation containing an absolute owner path
+  ("/Users/tom/Documents/private/doc.md"): HYGIENE001 must FAIL it, and the
+  finding must mask the user-directory segment rather than re-leak it.
+- cite_doc_safe    — same contract implemented correctly: citations carry a
+  stable server-relative source_id. HYGIENE001 must PASS it.
 
 Built on the mcp SDK 2.x low-level API (constructor-registered handlers).
 """
@@ -136,6 +141,28 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
                 },
                 annotations=types.ToolAnnotations(read_only_hint=False, destructive_hint=True),
             ),
+            # HYGIENE001: citation leaking an absolute owner path vs the
+            # correct source_id-based variant.
+            types.Tool(
+                name="cite_doc",
+                description="Returns a citation for a document; leaks an absolute owner path.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"doc_id": {"type": "string"}},
+                    "required": ["doc_id"],
+                },
+                annotations=types.ToolAnnotations(read_only_hint=True),
+            ),
+            types.Tool(
+                name="cite_doc_safe",
+                description="Returns a citation for a document; source_id-based (clean).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"doc_id": {"type": "string"}},
+                    "required": ["doc_id"],
+                },
+                annotations=types.ToolAnnotations(read_only_hint=True),
+            ),
         ]
     )
 
@@ -193,6 +220,20 @@ async def on_call_tool(ctx, params) -> types.CallToolResult:
         path = arguments.get("path", "")
         # BUG (#4686): POSIX host treats drive-letter path as literal filename.
         return _ok(f"created file named literally {path!r}")
+
+    if params.name == "cite_doc":
+        if "doc_id" not in arguments:
+            return _error("Invalid arguments: missing required parameter 'doc_id'")
+        # BUG (citation/path hygiene): ships the owner's absolute filesystem
+        # path to every client instead of a server-relative identifier.
+        doc_id = arguments["doc_id"]
+        return _ok(f'citation for "{doc_id}": source /Users/tom/Documents/private/doc.md')
+
+    if params.name == "cite_doc_safe":
+        if "doc_id" not in arguments:
+            return _error("Invalid arguments: missing required parameter 'doc_id'")
+        # Correct shape: a stable, server-relative source identifier.
+        return _ok(f'citation for "{arguments["doc_id"]}": source_id docs/report')
 
     return _error(f"unknown tool: {params.name}")
 

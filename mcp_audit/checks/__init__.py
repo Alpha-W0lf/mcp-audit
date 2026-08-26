@@ -6,6 +6,6 @@ registry (see mcp_audit.registry.load_checks).
 
 from __future__ import annotations
 
-from mcp_audit.checks import encoding, path_safety, runtime_required, schema
+from mcp_audit.checks import encoding, hygiene, path_safety, runtime_required, schema
 
-__all__ = ["encoding", "path_safety", "runtime_required", "schema"]
+__all__ = ["encoding", "hygiene", "path_safety", "runtime_required", "schema"]
