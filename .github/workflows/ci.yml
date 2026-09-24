@@ -18,6 +18,11 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]" mypy
 
+      - name: Stranger-path smoke
+        run: |
+          mcp-audit list-checks
+          mcp-audit run --server "python tests/fixtures/echo_server.py"
+
       - name: Tests
         run: pytest -q
 
