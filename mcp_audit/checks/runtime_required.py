@@ -1,8 +1,9 @@
 """RUNTIME001 — advertised `required` vs runtime-enforced arguments.
 
-The differentiating check. Seeded by modelcontextprotocol/servers#4651: a
-zod refactor changed runtime validation without updating the advertised JSON
-Schema, so `tools/list` and actual argument validation disagreed.
+The differentiating check. Seeded by public issue modelcontextprotocol/servers#4651
+filed by others: a zod refactor changed runtime validation without updating the
+advertised JSON Schema, so `tools/list` and actual argument validation disagreed.
+This check reproduces that failure class dynamically.
 
 Protocol per probe-eligible tool that advertises >= 1 required field:
 

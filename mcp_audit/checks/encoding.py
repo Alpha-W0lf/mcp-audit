@@ -1,9 +1,9 @@
 """ENCODING001 — multi-byte UTF-8 corruption at fixed-size chunk boundaries.
 
-Seeded by modelcontextprotocol/servers#4666: file-reading tools that split a
-file into fixed-size byte chunks and decoded each chunk *independently*
-silently replaced every multi-byte UTF-8 sequence straddling a chunk boundary
-with U+FFFD mojibake.
+Seeded by public issue modelcontextprotocol/servers#4666 filed by others:
+file-reading tools that split a file into fixed-size byte chunks and decoded each chunk
+*independently* silently replaced every multi-byte UTF-8 sequence straddling a chunk boundary
+with U+FFFD mojibake. This check reproduces that failure class.
 
 Protocol per discovered file-reading tool:
 

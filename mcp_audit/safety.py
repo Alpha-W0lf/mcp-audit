@@ -11,8 +11,9 @@ Because these are self-reported, unverified hints, this module treats them as a
 *floor for caution, not a guarantee of safety*: an eligible tool may still run
 arbitrary code inside the audited server process. Run mcp-audit against servers
 you control or trust; `--allow-destructive` exists for explicitly sandboxed
-environments, and `--allow-tool <name>` for consenting to probes against
-individual named tools while the gate stays in force for everything else.
+environments, and `--allow-tool <name>` for consenting to runtime probes against
+individual named tools while the gate stays in force for everything else
+(write-shaped probes such as PATHSAFE001 still require `--allow-destructive`).
 
 Default posture: if a server omits annotations entirely, the tool is NOT
 probe-eligible. Absence of evidence is treated as "may have side effects".

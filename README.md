@@ -8,14 +8,14 @@ production more often than anyone expects.
 
 ## Why
 
-Every check in this kit is seeded by a real defect or bug observed in practice:
+Every check in this kit is seeded by public upstream issues filed by others or by observed defect classes; this kit reproduces and asserts those classes:
 
 | Check | ID | Target defect or bug it catches |
 |---|---|---|
-| Schema well-formedness | `SCHEMA001` | Static well-formedness of advertised `inputSchema` (`required` ⊆ `properties`, types present). Seeded by the [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) investigation; this check does **not** catch the #4651 production shape (that is `RUNTIME001`) — a schema can be internally consistent and still disagree with runtime validation. Flags static schema declaration defects before tools are probed |
-| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) — live #4651 shape: `tools/list` omitted a field from `required` that runtime validation rejected, after a `z.preprocess` refactor changed zod-to-JSON-Schema conversion. Probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
-| Multi-byte encoding at chunk boundaries | `ENCODING001` | [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) — `headFile`/`tailFile` corrupted UTF-8 sequences straddling 1024-byte read boundaries |
-| Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) — `C:\Users\me\file.md` passed validation and was created as a literal backslash filename inside the sandbox |
+| Schema well-formedness | `SCHEMA001` | Static well-formedness of advertised `inputSchema` (`required` ⊆ `properties`, types present). Seeded by the public [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) issue filed upstream; this check does **not** catch the #4651 production shape (that is `RUNTIME001`) — a schema can be internally consistent and still disagree with runtime validation. Flags static schema declaration defects before tools are probed |
+| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) — live #4651 shape (reproduced from public upstream report): `tools/list` omitted a field from `required` that runtime validation rejected, after a `z.preprocess` refactor changed zod-to-JSON-Schema conversion. Probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
+| Multi-byte encoding at chunk boundaries | `ENCODING001` | [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) — public upstream report: `headFile`/`tailFile` corrupted UTF-8 sequences straddling 1024-byte read boundaries |
+| Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) — public upstream report: `C:\Users\me\file.md` passed validation and was created as a literal backslash filename inside the sandbox |
 | Citation/path hygiene | `HYGIENE001` | Owner absolute paths leaking into tool outputs (never ship `/Users/you/...` to clients) — generalized from concrete `/Users/...` path leaks in AI-KB MCP tool citations that seeded this project; the canonical rule statement is this table |
 
 ## Status
@@ -32,9 +32,10 @@ and production tools):
 - **Probe safety** (`safety.py`): live probes run only on tools whose
   server-asserted annotations say `readOnlyHint=true`. `destructiveHint=true`
   or `readOnlyHint=false` tools are skipped unless `--allow-destructive`
-  (global override) or `--allow-tool NAME` (per-tool consent; the gate stays
-  in force for everything else). Annotations are hints the server asserts
-  about itself — not guarantees; audit only servers you trust.
+  (global override) or `--allow-tool NAME` (per-tool consent for read-shaped
+  probes; the gate stays in force for everything else). PATHSAFE001 is a write
+  probe and requires `--allow-destructive`. Annotations are hints the server
+  asserts about itself — not guarantees; audit only servers you trust.
 - **Schema check** (`checks/schema.py`, `SCHEMA001`): static well-formedness
   of advertised `inputSchema` (`required` ⊆ `properties`, valid types
   declared); operates purely statically without calling tools. Seeded during
@@ -84,6 +85,8 @@ and production tools):
   separately so chatty servers can't corrupt results or reports.
 - **CLI**: `mcp-audit run` / `mcp-audit list-checks`, rich summary tables,
   `--json` machine-readable reports (also emitted on startup failure).
+- **Operational guidance**: See [docs/OPERATOR.md](docs/OPERATOR.md) for
+  operator deployment patterns, CI recipes, and sandboxing requirements.
 
 ## Install
 
@@ -152,10 +155,10 @@ Exit codes:
 Test suite:
 
 ```console
-$ pytest -m "not integration"   # unit tests only (no subprocesses)
-$ pytest                        # everything, including subprocess integration tests
+$ pytest -m "not integration"   # unit tests only (107 passed; no subprocesses)
+$ pytest                        # unit + standalone integration (119 passed, 2 skipped)
 $ export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
-$ pytest -m integration         # + dogfood suite against the buggy fixture server
+$ pytest                        # full suite including dogfood against buggy fixture (121 passed)
 ```
 
 Library use:
@@ -174,7 +177,8 @@ print(report.to_json())
 1. **Read-only by default.** Runtime probing can execute side effects; probes
    call only tools whose server-asserted annotations claim `readOnlyHint=true`,
    and never tools annotated destructive — unless you pass
-   `--allow-destructive` or consent per tool with `--allow-tool NAME`.
+   `--allow-destructive` or consent per tool with `--allow-tool NAME` (read probes
+   only; PATHSAFE001 write probe always requires `--allow-destructive`).
 2. **Every check cites its defect or rule.** Each check links to the upstream
    issue that seeded it or to the documented conformance/hygiene rule it enforces.
 3. **Minimal output, actionable failures.** Each failure names the field, the

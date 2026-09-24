@@ -1,10 +1,10 @@
 """PATHSAFE001 — Windows drive-letter paths must be rejected on POSIX hosts.
 
-Seeded by modelcontextprotocol/servers#4686: on a POSIX host, a filesystem
-tool accepted `C:\\Users\\me\\file.md`, treated it as a *relative* path
+Seeded by public issue modelcontextprotocol/servers#4686 filed by others: on a POSIX host,
+a filesystem tool accepted `C:\\Users\\me\\file.md`, treated it as a *relative* path
 (backslash is an ordinary filename character on POSIX), and created a single
 literal backslash filename inside its sandbox root instead of rejecting an
-out-of-root absolute path.
+out-of-root absolute path. This check reproduces that failure class.
 
 Tool-scope heuristic (documented, deliberately narrow)
 -----------------------------------------------------

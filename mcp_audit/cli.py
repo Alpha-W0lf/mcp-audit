@@ -85,8 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="NAME",
-        help="permit runtime probes against this tool even when annotations "
-        "gate it out (repeatable; mutually exclusive with --allow-destructive)",
+        help="permit runtime probes (RUNTIME001, ENCODING001, HYGIENE001) against "
+        "this tool even when annotations gate it out (repeatable; mutually exclusive "
+        "with --allow-destructive; PATHSAFE001 write probe requires --allow-destructive)",
     )
     p_run.add_argument(
         "--strict",

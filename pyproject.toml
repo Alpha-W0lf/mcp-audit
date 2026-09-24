@@ -1,9 +1,12 @@
 [project]
 name = "mcp-audit"
 version = "0.5.0"
-description = "Conformance test kit for MCP servers — schema, encoding, and path-safety checks seeded by real upstream bugs"
+description = "Conformance test kit for MCP servers (stdio) — schema, runtime contract, encoding, path safety, and hygiene checks seeded by public upstream issues filed by others"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "Tom Chacko", email = "tomchacko@gmail.com" },
+]
 license = { text = "MIT" }
 license-files = ["LICENSE"]
 dependencies = [
@@ -12,8 +15,15 @@ dependencies = [
     "typing_extensions; python_version < \"3.12\"",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Alpha-W0lf/mcp-audit"
+Repository = "https://github.com/Alpha-W0lf/mcp-audit"
+Issues = "https://github.com/Alpha-W0lf/mcp-audit/issues"
+Changelog = "https://github.com/Alpha-W0lf/mcp-audit/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.10.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.4.0",
