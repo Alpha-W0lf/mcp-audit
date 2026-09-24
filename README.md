@@ -84,9 +84,9 @@ upstream servers:
 Requires Python 3.11+. From a clone of this repository:
 
 ```console
-$ python3 -m venv .venv
+$ python -m venv .venv
 $ . .venv/bin/activate
-$ python3 -m pip install -e ".[dev]"
+$ python -m pip install -e ".[dev]"
 ```
 
 The editable install exposes the `mcp-audit` console command (mapped by
@@ -102,7 +102,7 @@ Both commands must exit 0. The second audits the checked-in echo fixture
 
 ```console
 $ mcp-audit list-checks
-$ mcp-audit run --server "python3 tests/fixtures/echo_server.py"
+$ mcp-audit run --server "python tests/fixtures/echo_server.py"
 ```
 
 ## Usage
