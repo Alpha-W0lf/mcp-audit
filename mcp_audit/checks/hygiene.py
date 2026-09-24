@@ -7,11 +7,12 @@ identity and directory layout to every client that receives it; the correct
 shape is a stable, server-relative identifier (``source_id: docs/report``).
 
 Citation choice: unlike SCHEMA001/RUNTIME001/ENCODING001/PATHSAFE001 there is
-no single upstream issue to cite — this check generalizes a hygiene rule from
-the AI-KB MCP work that seeded the project, and the canonical statement of the
-rule lives in this repo's own README bug table. The citation therefore links
-the README row (the MCP spec defines no path-hygiene conformance rule, so the
-modelcontextprotocol spec URL would not document *this* bug class).
+no single upstream issue to cite — this check generalizes concrete
+``/Users/...`` path leaks in AI-KB MCP tool citations that seeded the
+project, and the canonical statement of the rule lives in this repo's own
+README bug table. The citation therefore links the README row (the MCP spec
+defines no path-hygiene conformance rule, so the modelcontextprotocol spec
+URL would not document *this* bug class).
 
 Protocol per probe-eligible tool (same readOnlyHint safety gate as every
 runtime check):
@@ -48,7 +49,7 @@ CHECK_ID = "HYGIENE001"
 SEVERITY: Severity = "error"
 
 # No single upstream issue seeds this check (see module docstring); cite the
-# project's own README bug-table row that specifies the hygiene rule.
+# project's own README bug-table row that specifies the concrete leak rule.
 CITATION_HYGIENE = "https://github.com/Alpha-W0lf/mcp-audit#why"
 
 # Pattern classes detected in tool response text. Each regex captures the

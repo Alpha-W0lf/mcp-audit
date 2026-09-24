@@ -1,5 +1,8 @@
 """Dogfood integration test: audit the deliberately-buggy fixture server.
 
+Verifies detection across reproducible defect fixtures modeling upstream
+failure modes and production tool shapes.
+
 Skipped unless MCP_FIXTURE_SERVER names a runnable fixture command, e.g.:
 
     export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
@@ -10,13 +13,13 @@ Coverage (v0.3, extended in v0.5):
 - RUNTIME001 (dogfooded here):
   - strict_echo   -> passes (conformant rejection)
   - loose_required-> fails with severity=warning (schema stricter)
-  - hidden_beta   -> fails with severity=error (runtime stricter);
-                    overall CLI/report exit code is 1.
+  - hidden_beta   -> fails with severity=error (runtime stricter;
+                    overall CLI/report exit code is 1).
 - HYGIENE001 (dogfooded here):
-  - cite_doc      -> fails with severity=error (absolute owner path in the
-                    citation); the finding names the pattern class and masks
-                    the user-directory segment — the full leaked path must
-                    NOT appear in the message or details.
+  - cite_doc      -> fails with severity=error (concrete absolute owner path
+                    leak in citation, e.g. /Users/...); the finding names the
+                    pattern class and masks the user-directory segment — the
+                    full leaked path must NOT appear in the message or details.
   - cite_doc_safe -> passes (source_id-based citation).
 - ENCODING001 is covered by its own integration tests in test_encoding.py
   (fails `read_head` and `mojibake_read`, passes `read_head_safe`) (#4666).
