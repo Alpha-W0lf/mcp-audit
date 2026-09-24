@@ -231,6 +231,19 @@ async def test_write_probe_requires_destructive_allowance():
 
 
 @pytest.mark.asyncio
+async def test_allow_tool_does_not_satisfy_pathsafe_write_requirement():
+    """--allow-tool permits read probes but PATHSAFE001 is a write probe and
+    requires explicit --allow-destructive."""
+    session = FakeSession(lambda args: (True, "should never be reached"))
+    results = await REGISTRY.get("PATHSAFE001").fn(
+        _ctx(session, [_tool()], allow_tools=("write_file",))
+    )
+    r = _single(results)
+    assert r.status == "skip"
+    assert r.details["skip_reason"] == "write_probe_requires_allow_destructive"
+
+
+@pytest.mark.asyncio
 async def test_no_path_tools_skips():
     session = FakeSession(lambda args: (True, ""))
     results = await REGISTRY.get("PATHSAFE001").fn(_ctx(session, [], allow_destructive=True))

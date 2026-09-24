@@ -7,7 +7,7 @@ this project uses semantic versioning.
 
 ### Added
 
-- **HYGIENE001** implemented (new scope `hygiene`): the fourth bug class from
+- **HYGIENE001** implemented (new scope `hygiene`): the fifth check from
   the README table — citation/path hygiene. For each probe-eligible tool,
   makes one benign baseline call (reusing RUNTIME001's baseline argument
   synthesis) and scans the returned text for absolute owner filesystem paths:
