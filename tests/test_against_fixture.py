@@ -5,13 +5,19 @@ Skipped unless MCP_FIXTURE_SERVER names a runnable fixture command, e.g.:
     export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
     pytest -m integration
 
-Coverage (v0.3):
+Coverage (v0.3, extended in v0.5):
 
 - RUNTIME001 (dogfooded here):
   - strict_echo   -> passes (conformant rejection)
   - loose_required-> fails with severity=warning (schema stricter)
   - hidden_beta   -> fails with severity=error (runtime stricter);
                     overall CLI/report exit code is 1.
+- HYGIENE001 (dogfooded here):
+  - cite_doc      -> fails with severity=error (absolute owner path in the
+                    citation); the finding names the pattern class and masks
+                    the user-directory segment — the full leaked path must
+                    NOT appear in the message or details.
+  - cite_doc_safe -> passes (source_id-based citation).
 - ENCODING001 is covered by its own integration tests in test_encoding.py
   (fails `read_head` and `mojibake_read`, passes `read_head_safe`) (#4666).
 - PATHSAFE001 is covered by its own integration tests in test_path_safety.py
@@ -64,3 +70,20 @@ def test_runtime001_fails_on_loose_schema_tool(fixture_command, tmp_path):
 
     # error-severity failure trips the CI exit code; warnings do not
     assert report["exit_code"] == 1
+
+
+def test_hygiene001_fails_on_leaky_citation_tool(fixture_command, tmp_path):
+    """HYGIENE001 flags the citation tool that leaks an absolute owner path."""
+    report = _run(fixture_command, json_path=tmp_path / "h.json")
+    by_tool = {r["tool_name"]: r for r in report["results"] if r["check_id"] == "HYGIENE001"}
+
+    buggy = by_tool["cite_doc"]
+    assert buggy["status"] == "fail" and buggy["severity"] == "error"
+    assert "posix_home_path" in buggy["message"]
+    # The finding must never re-leak the full path: the user-directory
+    # segment is masked in both the message and the details.
+    assert "/Users/tom" not in buggy["message"]
+    assert "/Users/tom" not in str(buggy["details"])
+    assert "<redacted>" in buggy["message"]
+
+    assert by_tool["cite_doc_safe"]["status"] == "pass"

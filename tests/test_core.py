@@ -72,7 +72,12 @@ class TestExitCodes:
         data = __import__("json").loads(report.to_json())
         assert data["server_command"] == ["node", "srv.js"]
         assert data["exit_code"] == 0
+        assert data["strict"] is False
         assert data["results"][0]["check_id"] == "SCHEMA001"
+
+    def test_to_json_serializes_strict(self):
+        report = AuditReport(server_command=["x"], results=[], strict=True)
+        assert __import__("json").loads(report.to_json())["strict"] is True
 
     def test_invalid_enums_rejected(self):
         with pytest.raises(ValueError):
@@ -89,6 +94,7 @@ class TestRegistry:
             "RUNTIME001",
             "ENCODING001",
             "PATHSAFE001",
+            "HYGIENE001",
         }
 
     def test_duplicate_ids_rejected(self):
