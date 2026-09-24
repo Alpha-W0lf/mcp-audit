@@ -27,8 +27,9 @@ Also carries:
   safety gate skips it unless --allow-destructive (PATHSAFE001, servers#4686
   — must FAIL under --allow-destructive).
 - cite_doc         — returns a citation containing an absolute owner path
-  ("/Users/tom/Documents/private/doc.md"): HYGIENE001 must FAIL it, and the
-  finding must mask the user-directory segment rather than re-leak it.
+  ("/Users/tom/Documents/private/doc.md"): concrete path leak scenario that
+  HYGIENE001 must FAIL, and the finding must mask the user-directory segment
+  rather than re-leak it.
 - cite_doc_safe    — same contract implemented correctly: citations carry a
   stable server-relative source_id. HYGIENE001 must PASS it.
 
@@ -224,8 +225,9 @@ async def on_call_tool(ctx, params) -> types.CallToolResult:
     if params.name == "cite_doc":
         if "doc_id" not in arguments:
             return _error("Invalid arguments: missing required parameter 'doc_id'")
-        # BUG (citation/path hygiene): ships the owner's absolute filesystem
-        # path to every client instead of a server-relative identifier.
+        # BUG (concrete citation path hygiene leak): ships the owner's absolute
+        # filesystem path (/Users/tom/...) to clients instead of a server-relative
+        # identifier.
         doc_id = arguments["doc_id"]
         return _ok(f'citation for "{doc_id}": source /Users/tom/Documents/private/doc.md')
 
