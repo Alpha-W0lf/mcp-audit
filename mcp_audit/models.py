@@ -5,9 +5,11 @@ Every check emits `CheckResult` objects; a run aggregates them into an
 programmatic consumers agree:
 
 - 0: every result is pass or skip (failed *warnings* do not trip CI — the
-  warning severity exists precisely for "harmless direction" findings)
-- 1: at least one result has status=fail AND severity=error, or the audit
-  itself failed (server startup / teardown crash — see AuditReport.error)
+  warning severity exists precisely for "harmless direction" findings —
+  unless the operator passes --strict)
+- 1: at least one result has status=fail AND severity=error (under --strict:
+  status=fail alone suffices), or the audit itself failed (server startup /
+  teardown crash — see AuditReport.error)
 - 2: usage error (handled by the CLI before any server is spawned)
 - 130: interrupted via SIGINT (handled by the CLI)
 """
@@ -93,6 +95,9 @@ class AuditReport:
     # Set when the audit itself failed before/around check execution (e.g.
     # the server never initialized); results stays empty in that case.
     error: str | None = None
+    # --strict: failed warnings also yield exit 1. Reflected in the JSON
+    # report's exit_code, which is computed from this same policy.
+    strict: bool = False
 
     @property
     def summary(self) -> dict[str, Any]:
@@ -110,13 +115,16 @@ class AuditReport:
 
     @property
     def exit_code(self) -> int:
-        """0 = all pass/skip; 1 = any failed check with severity=error, or an
-        audit-level failure (error detail set)."""
+        """0 = all pass/skip; 1 = any failed check with severity=error (or any
+        failed check at all under strict mode), or an audit-level failure
+        (error detail set)."""
         if self.error is not None:
             return EXIT_CHECKS_FAILED
         return (
             EXIT_CHECKS_FAILED
-            if any(r.status == "fail" and r.severity == "error" for r in self.results)
+            if any(
+                r.status == "fail" and (self.strict or r.severity == "error") for r in self.results
+            )
             else EXIT_OK
         )
 

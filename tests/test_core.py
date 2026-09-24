@@ -1,7 +1,8 @@
-"""Unit tests: models (exit codes, summary), registry, safety gate."""
+"""Unit tests: models (exit codes, summary), registry, safety gate, CLI flags."""
 
 import pytest
 
+import mcp_audit.cli as cli
 from mcp_audit.driver import AdvertisedTool
 from mcp_audit.models import AuditReport, CheckResult
 from mcp_audit.registry import REGISTRY, RegistryError, load_checks
@@ -37,6 +38,18 @@ class TestExitCodes:
 
     def test_failed_error_is_one(self):
         report = AuditReport(server_command=["x"], results=[_result(status="fail")])
+        assert report.exit_code == 1
+
+    def test_failed_warning_is_one_under_strict(self):
+        report = AuditReport(
+            server_command=["x"],
+            results=[_result(status="fail", severity="warning")],
+            strict=True,
+        )
+        assert report.exit_code == 1
+
+    def test_failed_error_still_one_under_strict(self):
+        report = AuditReport(server_command=["x"], results=[_result(status="fail")], strict=True)
         assert report.exit_code == 1
 
     def test_summary_counts(self):
@@ -137,3 +150,51 @@ class TestSafetyGate:
             allow_destructive=True,
         )
         assert d.eligible
+
+    def test_allow_tool_overrides_gate_for_named_tool(self):
+        d = probe_eligibility(
+            self._tool({"readOnlyHint": False, "destructiveHint": True}),
+            allow_tools=("t",),
+        )
+        assert d.eligible
+        assert "--allow-tool t" in d.reason
+
+    def test_allow_tool_leaves_gate_in_force_for_other_tools(self):
+        d = probe_eligibility(
+            self._tool({"readOnlyHint": False, "destructiveHint": True}),
+            allow_tools=("someone_else",),
+        )
+        assert not d.eligible and d.outcome == "destructive_hint_true"
+
+
+class TestCliFlags:
+    """--strict plumbing and --allow-tool/--allow-destructive conflict.
+
+    run_checks is monkeypatched so no server subprocess is spawned: the fake
+    returns a report whose only finding is a failed warning, isolating the
+    exit-code policy and the flag wiring.
+    """
+
+    def _run_with_warning_report(self, monkeypatch, argv_extra) -> int:
+        async def fake_run_checks(command, **kw):
+            return AuditReport(
+                server_command=list(command),
+                results=[_result(status="fail", severity="warning")],
+                strict=kw.get("strict", False),
+            )
+
+        monkeypatch.setattr(cli, "run_checks", fake_run_checks)
+        return cli.main(["run", "--server", "true", *argv_extra])
+
+    def test_warning_fail_exits_zero_without_strict(self, monkeypatch):
+        assert self._run_with_warning_report(monkeypatch, []) == 0
+
+    def test_warning_fail_exits_one_with_strict(self, monkeypatch):
+        assert self._run_with_warning_report(monkeypatch, ["--strict"]) == 1
+
+    def test_allow_tool_conflicts_with_allow_destructive(self, capsys):
+        code = cli.main(
+            ["run", "--server", "true", "--allow-destructive", "--allow-tool", "write_file"]
+        )
+        assert code == 2
+        assert "mutually exclusive" in capsys.readouterr().err

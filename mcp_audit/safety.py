@@ -11,7 +11,8 @@ Because these are self-reported, unverified hints, this module treats them as a
 *floor for caution, not a guarantee of safety*: an eligible tool may still run
 arbitrary code inside the audited server process. Run mcp-audit against servers
 you control or trust; `--allow-destructive` exists for explicitly sandboxed
-environments.
+environments, and `--allow-tool <name>` for consenting to probes against
+individual named tools while the gate stays in force for everything else.
 
 Default posture: if a server omits annotations entirely, the tool is NOT
 probe-eligible. Absence of evidence is treated as "may have side effects".
@@ -50,21 +51,31 @@ def _annotations(tool: Any) -> dict[str, Any]:
     return {}
 
 
-def probe_eligibility(tool: Any, *, allow_destructive: bool = False) -> ProbeDecision:
+def probe_eligibility(
+    tool: Any, *, allow_destructive: bool = False, allow_tools: tuple[str, ...] = ()
+) -> ProbeDecision:
     """Decide whether RUNTIME-style probes may call this tool.
 
     Precedence:
       1. --allow-destructive forces eligibility (operator override).
-      2. destructiveHint=true -> never probe.
-      3. readOnlyHint=false  -> never probe.
-      4. readOnlyHint absent -> not eligible (safe default).
-      5. readOnlyHint=true   -> eligible (destructiveHint is defined by the MCP
+      2. tool named in --allow-tool -> eligible (per-tool operator override;
+         the annotation gate stays in force for all other tools).
+      3. destructiveHint=true -> never probe.
+      4. readOnlyHint=false  -> never probe.
+      5. readOnlyHint absent -> not eligible (safe default).
+      6. readOnlyHint=true   -> eligible (destructiveHint is defined by the MCP
          spec to be meaningless when readOnlyHint is true).
     """
     if allow_destructive:
         return ProbeDecision(
             ELIGIBLE,
             "--allow-destructive passed; annotation gate overridden by operator",
+        )
+    name = getattr(tool, "name", None)
+    if isinstance(name, str) and name in allow_tools:
+        return ProbeDecision(
+            ELIGIBLE,
+            f"--allow-tool {name} passed; annotation gate overridden for this tool only",
         )
     ann = _annotations(tool)
     if ann.get("destructiveHint") is True and ann.get("readOnlyHint") is not True:
@@ -80,5 +91,13 @@ def probe_eligibility(tool: Any, *, allow_destructive: bool = False) -> ProbeDec
     return ProbeDecision(ELIGIBLE, "server asserts readOnlyHint=true")
 
 
-def eligible_tools(tools: list[Any], *, allow_destructive: bool = False) -> list[Any]:
-    return [t for t in tools if probe_eligibility(t, allow_destructive=allow_destructive).eligible]
+def eligible_tools(
+    tools: list[Any], *, allow_destructive: bool = False, allow_tools: tuple[str, ...] = ()
+) -> list[Any]:
+    return [
+        t
+        for t in tools
+        if probe_eligibility(
+            t, allow_destructive=allow_destructive, allow_tools=allow_tools
+        ).eligible
+    ]

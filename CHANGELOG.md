@@ -3,6 +3,26 @@
 All notable changes to mcp-audit. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses semantic versioning.
 
+## [0.4.0]
+
+### Added
+
+- **`--strict`** on `mcp-audit run`: failed checks with severity `warning`
+  also yield exit code 1 (default unchanged: only severity `error` trips CI).
+  The policy lives in `AuditReport.exit_code`, so the JSON report's
+  `exit_code` reflects it too.
+- **`--allow-tool NAME`** (repeatable): per-tool probe consent. Named tools
+  are probe-eligible regardless of their annotations while the annotation
+  gate stays in force for every other tool; mutually exclusive with
+  `--allow-destructive` (passing both is a usage error, exit 2).
+- Pattern-aware baseline synthesis in RUNTIME001: string properties with a
+  regex `pattern` constraint now try, in order, the field name itself,
+  `mcp-audit`, and a value derived from a simple literal prefix in the
+  pattern (e.g. `^thought-` -> `thought-mcp-audit`). A candidate is accepted
+  only if the pattern matches (JSON Schema search semantics) and
+  minLength/maxLength hold; otherwise the field is unsynthesizable and the
+  baseline is skipped instead of sending a value the server will reject.
+
 ## [0.3.0]
 
 ### Added

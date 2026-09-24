@@ -20,7 +20,7 @@ Every check in this kit is seeded by a real bug found in the wild:
 
 ## Status
 
-`v0.3` — all four checks implemented, registered, and dogfooded against real
+`v0.4` — all four checks implemented, registered, and dogfooded against real
 upstream servers:
 
 - **Result model** (`models.py`): every finding is a `CheckResult`
@@ -30,14 +30,23 @@ upstream servers:
   scope=...)`; stable IDs so CI can suppress with `--skip RUNTIME001`.
 - **Probe safety** (`safety.py`): live probes run only on tools whose
   server-asserted annotations say `readOnlyHint=true`. `destructiveHint=true`
-  or `readOnlyHint=false` tools are skipped unless `--allow-destructive`.
-  Annotations are hints the server asserts about itself — not guarantees;
-  audit only servers you trust.
+  or `readOnlyHint=false` tools are skipped unless `--allow-destructive`
+  (global override) or `--allow-tool NAME` (per-tool consent; the gate stays
+  in force for everything else). Annotations are hints the server asserts
+  about itself — not guarantees; audit only servers you trust.
 - **Runtime probe** (`checks/runtime_required.py`, `RUNTIME001`): for each
   eligible tool with required fields, calls it omitting each required field in
   turn. Success ⇒ schema stricter than runtime (warning); error naming a field
   not in `required` ⇒ runtime stricter than advertised (**error** — the #4651
-  production shape). Per-call timeouts; baseline-call sanity gate.
+  production shape). Per-call timeouts; baseline-call sanity gate. Baseline
+  synthesis honors string `pattern` constraints: candidates are tried in
+  order (the field name, `mcp-audit`, a value derived from a simple literal
+  prefix like `^thought-` → `thought-mcp-audit`) and accepted only if the
+  pattern matches; otherwise the field is unsynthesizable and the baseline is
+  skipped rather than probed with an invalid value.
+- **Strict mode**: `--strict` makes failed warnings trip exit code 1 too —
+  for CI pipelines that want zero tolerated findings (default: only
+  severity `error` fails the run).
 - **Encoding probe** (`checks/encoding.py`, `ENCODING001`): writes a temp
   fixture whose multi-byte marker straddles 1024/2048-byte chunk boundaries,
   then reads it through each file-reading tool; fails on U+FFFD mojibake or a
@@ -62,8 +71,8 @@ The citation/path-hygiene probe remains specified but unimplemented.
 ```console
 $ mcp-audit list-checks
 $ mcp-audit run --server "node dist/index.js" [--arg ARG]... [--skip ID]...
-      [--only ID]... [--allow-destructive] [--json PATH]
-      [--startup-timeout SECONDS] [--call-timeout SECONDS]
+      [--only ID]... [--allow-destructive | --allow-tool NAME]... [--strict]
+      [--json PATH] [--startup-timeout SECONDS] [--call-timeout SECONDS]
 ```
 
 `--arg` values are appended to the server command verbatim; they are also the
@@ -78,13 +87,19 @@ server-side artifact with that name inside its allowed root. This is by
 design and operator-consented — run it only against sandboxed servers, and
 delete any `mcp-audit-probe` artifact afterwards if the server persists it.
 
+`--allow-tool NAME` is the granular alternative to `--allow-destructive`: it
+permits runtime probes against the named tools only (repeatable), leaving the
+annotation gate in force for everything else. The two flags are mutually
+exclusive — passing both is a usage error (exit 2). The same side-effect
+caveat applies: only name tools on servers you trust.
+
 Exit codes:
 
 | Code | Meaning |
 |---|---|
-| `0` | every result is pass or skip (failed *warnings* do not trip CI) |
-| `1` | a failed check with severity `error`, server startup failure, or an unexpected teardown crash |
-| `2` | usage error (bad flags, unknown check IDs, unparseable `--server`) |
+| `0` | every result is pass or skip (failed *warnings* do not trip CI unless `--strict`) |
+| `1` | a failed check with severity `error`, any failed check under `--strict`, server startup failure, or an unexpected teardown crash |
+| `2` | usage error (bad flags, unknown check IDs, unparseable `--server`, `--allow-tool` combined with `--allow-destructive`) |
 | `130` | interrupted via SIGINT |
 
 Test suite:
@@ -112,7 +127,7 @@ print(report.to_json())
 1. **Read-only by default.** Runtime probing can execute side effects; probes
    call only tools whose server-asserted annotations claim `readOnlyHint=true`,
    and never tools annotated destructive — unless you pass
-   `--allow-destructive`.
+   `--allow-destructive` or consent per tool with `--allow-tool NAME`.
 2. **Every check cites its bug.** If a check exists, a real server shipped the bug.
 3. **Minimal output, actionable failures.** Each failure names the field, the
    advertised schema, and the observed behavior.

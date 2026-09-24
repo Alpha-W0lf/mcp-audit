@@ -73,6 +73,45 @@ def test_baseline_unsynthesizable_returns_none():
     assert baseline_arguments(t) is None
 
 
+# --- pattern-constrained string synthesis ------------------------------------
+
+
+def test_pattern_literal_prefix_derives_value():
+    # ^thought- -> "thought-mcp-audit" (field name and "mcp-audit" don't match)
+    t = _tool(["thought"], {"thought": {"type": "string", "pattern": "^thought-"}})
+    assert baseline_arguments(t) == {"thought": "thought-mcp-audit"}
+
+
+def test_pattern_character_class_matches_field_name():
+    t = _tool(["thought"], {"thought": {"type": "string", "pattern": "^[a-z]+$"}})
+    assert baseline_arguments(t) == {"thought": "thought"}
+
+
+def test_pattern_character_class_with_length_bounds():
+    t = _tool(["token"], {"token": {"type": "string", "pattern": "^[a-z]{3,10}$"}})
+    assert baseline_arguments(t) == {"token": "token"}
+
+
+def test_pattern_unsatisfiable_marks_unsynthesizable():
+    # no candidate matches ^\d+$ -> baseline skip, not an invalid probe value
+    t = _tool(["thought"], {"thought": {"type": "string", "pattern": r"^\d+$"}})
+    assert baseline_arguments(t) is None
+
+
+def test_pattern_invalid_regex_marks_unsynthesizable():
+    t = _tool(["x"], {"x": {"type": "string", "pattern": "(["}})
+    assert baseline_arguments(t) is None
+
+
+def test_pattern_respects_max_length():
+    # every candidate exceeds maxLength -> unsynthesizable, not truncated junk
+    t = _tool(
+        ["thought"],
+        {"thought": {"type": "string", "pattern": "^[a-z]+$", "maxLength": 3}},
+    )
+    assert baseline_arguments(t) is None
+
+
 # --- check branches ----------------------------------------------------------
 
 
@@ -172,3 +211,35 @@ async def test_unannotated_tool_skipped_without_flag():
     forced = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t], allow_destructive=True))
     rf = _result_for(forced, "quiet")
     assert rf.status == "fail" and rf.severity == "warning"
+
+
+@pytest.mark.asyncio
+async def test_allow_tool_probes_named_tool_only():
+    # --allow-tool grants per-tool consent: the named destructive tool is
+    # probed while the annotation gate stays in force for the other one.
+    session = FakeSession(lambda args: (True, ""))
+
+    def write_tool(name):
+        return AdvertisedTool(
+            name=name,
+            description=None,
+            input_schema={
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "required": ["a"],
+            },
+            annotations={"readOnlyHint": False, "destructiveHint": True},
+        )
+
+    results = await REGISTRY.get("RUNTIME001").fn(
+        _ctx(
+            session,
+            [write_tool("allowed_write"), write_tool("other_write")],
+            allow_tools=("allowed_write",),
+        )
+    )
+    probed = _result_for(results, "allowed_write")
+    assert probed.status == "fail" and probed.severity == "warning"
+    skipped = _result_for(results, "other_write")
+    assert skipped.status == "skip"
+    assert skipped.details["skip_reason"] == "destructive_hint_true"
