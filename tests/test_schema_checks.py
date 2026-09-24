@@ -30,7 +30,9 @@ def test_valid_schema_passes():
 
 
 def test_required_field_missing_from_properties_is_caught():
-    # The #4651 shape: schema drift between required list and properties.
+    # Static well-formedness: advertised required names a field that is not in
+    # properties. This is NOT the #4651 production shape (runtime stricter
+    # than advertised required) — that is RUNTIME001.
     tool = _tool(
         {
             "type": "object",

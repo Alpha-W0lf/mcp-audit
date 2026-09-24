@@ -12,8 +12,8 @@ Every check in this kit is seeded by a real bug found in the wild:
 
 | Check | ID | Real bug it catches |
 |---|---|---|
-| Schema well-formedness | `SCHEMA001` | [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) — `tools/list` omitted a field from `required` that runtime validation rejected, after a `z.preprocess` refactor changed zod-to-JSON-Schema conversion |
-| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | Same #4651 bug class, caught dynamically: probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
+| Schema well-formedness | `SCHEMA001` | Static well-formedness of advertised `inputSchema` (`required` ⊆ `properties`, types present). Seeded by the [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) investigation; this check does **not** catch the #4651 production shape — a schema can be internally consistent and still disagree with runtime validation |
+| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) — live #4651 shape: `tools/list` omitted a field from `required` that runtime validation rejected, after a `z.preprocess` refactor changed zod-to-JSON-Schema conversion. Probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
 | Multi-byte encoding at chunk boundaries | `ENCODING001` | [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) — `headFile`/`tailFile` corrupted UTF-8 sequences straddling 1024-byte read boundaries |
 | Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) — `C:\Users\me\file.md` passed validation and was created as a literal backslash filename inside the sandbox |
 | Citation/path hygiene | `HYGIENE001` | Owner absolute paths leaking into tool outputs (never ship `/Users/you/...` to clients) — generalized from the AI-KB MCP work that seeded this project; the canonical rule statement is this table |
@@ -79,6 +79,32 @@ upstream servers:
 - **CLI**: `mcp-audit run` / `mcp-audit list-checks`, rich summary tables,
   `--json` machine-readable reports (also emitted on startup failure).
 
+## Install
+
+Requires Python 3.11+. From a clone of this repository:
+
+```console
+$ python3 -m venv .venv
+$ . .venv/bin/activate
+$ python3 -m pip install -e ".[dev]"
+```
+
+The editable install exposes the `mcp-audit` console command (mapped by
+`pyproject.toml` to `mcp_audit.cli:main`).
+
+Optional equivalent if you already use [uv](https://docs.astral.sh/uv/):
+`uv pip install -e ".[dev]"`. uv is not required.
+
+### Verify the install
+
+Both commands must exit 0. The second audits the checked-in echo fixture
+(five checks against a well-formed, read-only `echo` tool):
+
+```console
+$ mcp-audit list-checks
+$ mcp-audit run --server "python3 tests/fixtures/echo_server.py"
+```
+
 ## Usage
 
 ```console
@@ -100,11 +126,13 @@ server-side artifact with that name inside its allowed root. This is by
 design and operator-consented — run it only against sandboxed servers, and
 delete any `mcp-audit-probe` artifact afterwards if the server persists it.
 
-`--allow-tool NAME` is the granular alternative to `--allow-destructive`: it
-permits runtime probes against the named tools only (repeatable), leaving the
-annotation gate in force for everything else. The two flags are mutually
-exclusive — passing both is a usage error (exit 2). The same side-effect
-caveat applies: only name tools on servers you trust.
+`--allow-tool NAME` is the granular alternative to `--allow-destructive` for
+the annotation gate: it permits runtime probes (RUNTIME001, ENCODING001,
+HYGIENE001) against the named tools only (repeatable), leaving the gate in
+force for everything else. PATHSAFE001 is a write probe and still requires
+`--allow-destructive` — `--allow-tool` does not enable it. The two flags
+are mutually exclusive — passing both is a usage error (exit 2). The same
+side-effect caveat applies: only name tools on servers you trust.
 
 Exit codes:
 
