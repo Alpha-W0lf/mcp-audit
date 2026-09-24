@@ -1,11 +1,10 @@
 """SCHEMA001 — advertised inputSchema internal consistency.
 
 Refactor of v0.1's check_schema_well_formed onto the registry/CheckResult
-model. Seeded by modelcontextprotocol/servers#4651: a tool's
-`inputSchema.required` advertised one contract while runtime validation
-enforced another, after a zod refactor changed schema generation.
-
-Static scope: no tool calls are made.
+model. Static well-formedness only: no tool calls are made. Seeded by the
+modelcontextprotocol/servers#4651 investigation; this check does not catch
+the #4651 production shape (runtime stricter than advertised required) —
+that is RUNTIME001.
 """
 
 from __future__ import annotations
