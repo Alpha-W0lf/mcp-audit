@@ -4,7 +4,7 @@
 
 If you discover a security issue or vulnerability in `mcp-audit`, please report it responsibly.
 
-- **Email**: Contact Tom Chacko directly via GitHub security advisories or email at `tomchacko@gmail.com`.
+- **Email**: Contact Tom Chacko directly via GitHub security advisories or email at `tchacko615@gmail.com`.
 - **Response time**: You will receive an acknowledgment within 48 hours.
 - **Coordination**: We ask that you give us reasonable time to investigate and address the vulnerability before public disclosure.
 

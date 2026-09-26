@@ -5,7 +5,7 @@ description = "Conformance test kit for MCP servers (stdio) — schema, runtime 
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-    { name = "Tom Chacko", email = "tomchacko@gmail.com" },
+    { name = "Tom Chacko", email = "tchacko615@gmail.com" },
 ]
 license = { text = "MIT" }
 license-files = ["LICENSE"]
