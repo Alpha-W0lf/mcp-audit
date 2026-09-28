@@ -1,28 +1,43 @@
 # mcp-audit
 
-Conformance test kit for [Model Context Protocol](https://modelcontextprotocol.io) servers.
+Conformance test kit that catches the gap between what an [MCP](https://modelcontextprotocol.io)
+server *advertises* and what it *actually does* — before that gap ships to production.
 
-Point it at any MCP server (stdio transport) and run assertions against what it
-*advertises* versus what it *accepts* — the mismatch class that ships to
-production more often than anyone expects.
+An MCP server declares its contract in `tools/list`: input schemas, required
+fields, safety hints. A separate code path then enforces — or fails to
+enforce — that same contract at runtime. That gap is where real MCP servers
+have shipped real bugs: a `required` field the server never checks, a
+chunked file reader that corrupts UTF-8 at a byte boundary, a path validator
+that accepts Windows-style paths on POSIX, a citation that leaks the
+operator's home directory. Point `mcp-audit` at any stdio MCP server and it
+runs live, safety-gated probes that reproduce each of these failure classes
+and report exactly which one, if any, is present.
+
+**At a glance:** 5 conformance checks · 121 tests (unit + real-subprocess
+dogfood, no mocks) · full test/lint/type-check suite green in CI on Python
+3.11 and 3.12 · fail-closed probe safety by default · MIT.
 
 ## Why
 
-Every check in this kit is seeded by public upstream issues filed by others or by observed defect classes; this kit reproduces and asserts those classes:
+Four of the five checks are seeded by real, public upstream issues — filed
+by other engineers against production MCP servers, not by this project. The
+fifth (`HYGIENE001`) generalizes a concrete path leak this project's own
+earlier work produced. Every check reproduces its failure class as a
+runnable fixture and asserts against it, not just against a hypothetical:
 
 | Check | ID | Target defect or bug it catches |
 |---|---|---|
-| Schema well-formedness | `SCHEMA001` | Static well-formedness of advertised `inputSchema` (`required` ⊆ `properties`, types present). Seeded by the public [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) issue filed upstream; this check does **not** catch the #4651 production shape (that is `RUNTIME001`) — a schema can be internally consistent and still disagree with runtime validation. Flags static schema declaration defects before tools are probed |
-| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) — live #4651 shape (reproduced from public upstream report): `tools/list` omitted a field from `required` that runtime validation rejected, after a `z.preprocess` refactor changed zod-to-JSON-Schema conversion. Probes omit advertised-required fields on `readOnlyHint` tools and compare runtime behavior against the advertised contract in both directions |
-| Multi-byte encoding at chunk boundaries | `ENCODING001` | [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) — public upstream report: `headFile`/`tailFile` corrupted UTF-8 sequences straddling 1024-byte read boundaries |
-| Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) — public upstream report: `C:\Users\me\file.md` passed validation and was created as a literal backslash filename inside the sandbox |
-| Citation/path hygiene | `HYGIENE001` | Owner absolute paths leaking into tool outputs (never ship `/Users/you/...` to clients) — generalized from concrete `/Users/...` path leaks in AI-KB MCP tool citations that seeded this project; the canonical rule statement is this table |
+| Schema well-formedness | `SCHEMA001` | Static well-formedness of advertised `inputSchema` (`required` ⊆ `properties`, valid types declared). Does **not** catch the runtime #4651 mismatch below — that's `RUNTIME001` — since a schema can be internally consistent and still disagree with what the server enforces. Flags declaration defects before any tool is probed. Seeded by public issue [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) |
+| Advertised-vs-runtime required fields (live probe) | `RUNTIME001` | The live #4651 shape: `tools/list` omitted a field from `required` that runtime validation rejected anyway, after a `z.preprocess` refactor changed how zod converts to JSON Schema. Probes omit each advertised-required field in turn and compare runtime behavior against the advertised contract in both directions. Seeded by public issue [modelcontextprotocol/servers#4651](https://github.com/modelcontextprotocol/servers/issues/4651) |
+| Multi-byte encoding at chunk boundaries | `ENCODING001` | `headFile`/`tailFile`-style tools that decode fixed-size byte chunks independently corrupt any UTF-8 sequence straddling a chunk boundary. Seeded by public issue [modelcontextprotocol/servers#4666](https://github.com/modelcontextprotocol/servers/issues/4666) |
+| Path safety (Windows-style paths on POSIX) | `PATHSAFE001` | `C:\Users\me\file.md` passed validation on a POSIX host and was created as a literal backslash filename inside the sandbox instead of being rejected. Seeded by public issue [modelcontextprotocol/servers#4686](https://github.com/modelcontextprotocol/servers/issues/4686) |
+| Citation/path hygiene | `HYGIENE001` | Owner absolute paths leaking into tool outputs — never ship `/Users/you/...` to a client. Generalized from a concrete `/Users/...` path leak this project's own AI-KB MCP tool citations produced; the canonical rule statement is this table row (the MCP spec defines no path-hygiene conformance rule of its own) |
 
 ## Status
 
-`v0.5` — all five checks implemented, registered, and validated against
-reproducible defect fixtures (modeling failure shapes from upstream servers
-and production tools):
+`v0.5.0` — all five checks implemented, registered, and validated
+end-to-end: every failure class above is reproduced by a real, spawned MCP
+server in CI (`tests/fixtures/fixture_server.py`), not mocked.
 
 - **Result model** (`models.py`): every finding is a `CheckResult`
   (stable check id, severity, status, message, citation, tool name, details)
@@ -60,13 +75,16 @@ and production tools):
   fixture whose multi-byte marker straddles 1024/2048-byte chunk boundaries,
   then reads it through each file-reading tool; fails on U+FFFD mojibake or a
   missing/mangled marker (#4666). Fixture writes use `tempfile.mkstemp` in
-  directories that already exist — the audit tool never creates directories.
+  directories that already exist — the audit tool never creates directories,
+  and the unpredictable filename defeats a hostile server pre-placing a
+  symlink at a guessed path.
 - **Path-safety probe** (`checks/path_safety.py`, `PATHSAFE001`): offers
   `C:\mcp-audit-probe.txt` to the first eligible path-accepting tool on POSIX
   hosts (requires `--allow-destructive`); acceptance is a **fail** (#4686),
   corroborated by locating — and deleting — the literal backslash filename in
   the sandbox root. Rejection is only scored PASS when the error reads as
-  path validation AND no probe file was created.
+  path validation AND no probe file was created — an error that merely
+  echoes the probe value back is not accepted as evidence of validation.
 - **Hygiene probe** (`checks/hygiene.py`, `HYGIENE001`): for each
   probe-eligible tool, makes one benign baseline call (same synthesized
   arguments as RUNTIME001) and scans the returned text for absolute owner
@@ -77,16 +95,14 @@ and production tools):
   so the report never re-leaks owner identity into CI logs. Passes when the
   baseline response is clean; skips per tool when gate-ineligible, when
   baseline arguments are unsynthesizable, or when the baseline call fails.
-  Citation: the README bug-table row above — the MCP spec defines no
-  path-hygiene conformance rule, so this check cites the project's own
-  statement of the rule it generalizes.
 - **Hardened driver** (`driver.py`): bounded startup (default 10 s) with clear
   errors when a server dies before initialize; server stderr captured
-  separately so chatty servers can't corrupt results or reports.
+  separately so a chatty server can't corrupt results or masquerade as tool
+  content.
 - **CLI**: `mcp-audit run` / `mcp-audit list-checks`, rich summary tables,
   `--json` machine-readable reports (also emitted on startup failure).
-- **Operational guidance**: See [docs/OPERATOR.md](docs/OPERATOR.md) for
-  operator deployment patterns, CI recipes, and sandboxing requirements.
+- **Operational guidance**: see [docs/OPERATOR.md](docs/OPERATOR.md) for
+  deployment patterns, CI recipes, and sandboxing requirements.
 
 ## Install
 
