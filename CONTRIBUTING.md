@@ -22,7 +22,8 @@ Run the test suite and quality gates before opening a pull request:
 # Fast unit tests (107 tests, no subprocesses)
 $ pytest -m "not integration"
 
-# Subprocess integration tests with dogfood fixture (121 tests total)
+# Full suite: unit + integration, including the dogfood run against the
+# fixture server below (121 tests total)
 $ export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
 $ pytest
 

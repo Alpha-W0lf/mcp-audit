@@ -13,9 +13,10 @@ operator's home directory. Point `mcp-audit` at any stdio MCP server and it
 runs live, safety-gated probes that reproduce each of these failure classes
 and report exactly which one, if any, is present.
 
-**At a glance:** 5 conformance checks · 121 tests (unit + real-subprocess
-dogfood, no mocks) · full test/lint/type-check suite green in CI on Python
-3.11 and 3.12 · fail-closed probe safety by default · MIT.
+**At a glance:** 5 conformance checks · 121 tests, including a real-subprocess
+dogfood run for every check against an actually-spawned MCP server · full
+test/lint/type-check suite green in CI on Python 3.11 and 3.12 · fail-closed
+probe safety by default · MIT.
 
 ## Why
 
@@ -51,11 +52,9 @@ server in CI (`tests/fixtures/fixture_server.py`), not mocked.
   probes; the gate stays in force for everything else). PATHSAFE001 is a write
   probe and requires `--allow-destructive`. Annotations are hints the server
   asserts about itself — not guarantees; audit only servers you trust.
-- **Schema check** (`checks/schema.py`, `SCHEMA001`): static well-formedness
-  of advertised `inputSchema` (`required` ⊆ `properties`, valid types
-  declared); operates purely statically without calling tools. Seeded during
-  investigation of #4651; does not catch the runtime #4651 mismatch (that is
-  RUNTIME001), but flags malformed schemas before probe execution.
+- **Schema check** (`checks/schema.py`, `SCHEMA001`): the static half of the
+  #4651 pair above — runs without calling any tool, so it's a cheap first
+  pass even before you've decided whether to probe a server live.
 - **Runtime probe** (`checks/runtime_required.py`, `RUNTIME001`): for each
   eligible tool with required fields, calls it omitting each required field in
   turn. Success ⇒ schema stricter than runtime (warning); error naming a field
