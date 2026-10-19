@@ -1,0 +1,64 @@
+[project]
+name = "mcp-audit"
+version = "0.5.0"
+description = "Conformance tests for MCP servers: catches drift between what a server advertises and what it does. Flagged two known bugs (#4651, #4686) in the official reference servers before their fixes shipped. Tested in CI on every PR."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Tom Chacko", email = "74878700+Alpha-W0lf@users.noreply.github.com" },
+]
+license = { text = "MIT" }
+license-files = ["LICENSE"]
+dependencies = [
+    "mcp>=2.0.0",
+    "rich>=13.0",
+    "typing_extensions; python_version < \"3.12\"",
+]
+
+[project.urls]
+Homepage = "https://github.com/Alpha-W0lf/mcp-audit"
+Repository = "https://github.com/Alpha-W0lf/mcp-audit"
+Issues = "https://github.com/Alpha-W0lf/mcp-audit/issues"
+Changelog = "https://github.com/Alpha-W0lf/mcp-audit/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.10.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+mcp-audit = "mcp_audit.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_audit"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "BLE", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+# The mcp SDK types are pydantic models; the plugin understands their field
+# aliases, so wire-format kwargs (e.g. inputSchema=...) type-check.
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: spawns real server subprocesses; the dogfood suite additionally requires the MCP_FIXTURE_SERVER env var",
+]
+asyncio_mode = "auto"
+
+[tool.pytest_asyncio]
+default_fixture_loop_scope = "function"

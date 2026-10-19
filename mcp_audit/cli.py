@@ -1,0 +1,325 @@
+"""CLI entry points: `mcp-audit run` and `mcp-audit list-checks`.
+
+Exit codes (see mcp_audit.models): 0 all pass/skip; 1 any failed check with
+severity=error (failed warnings do NOT trip CI unless --strict), server
+startup failure, or an unexpected teardown crash; 2 usage error; 130
+interrupted (SIGINT).
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import shlex
+import sys
+import traceback
+from pathlib import Path
+from typing import Any
+
+from rich.console import Console
+from rich.table import Table
+
+from mcp_audit import __version__
+from mcp_audit.driver import ServerStartupError, connect
+from mcp_audit.models import (
+    EXIT_CHECKS_FAILED,
+    EXIT_INTERRUPTED,
+    EXIT_OK,
+    EXIT_USAGE,
+    AuditReport,
+    CheckResult,
+)
+from mcp_audit.registry import REGISTRY, CheckContext, CheckSpec, load_checks
+
+console = Console()
+
+# Message column truncation in the results table: messages longer than
+# _MAX_MESSAGE_COL are cut at _MAX_MESSAGE_COL - len("...") and ellipsized.
+_MAX_MESSAGE_COL = 120
+_TRUNCATED_MESSAGE_COL = _MAX_MESSAGE_COL - 3
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mcp-audit",
+        description="Conformance test kit for MCP servers.",
+    )
+    parser.add_argument("--version", action="version", version=f"mcp-audit {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_run = sub.add_parser("run", help="audit a server over stdio")
+    p_run.add_argument(
+        "--server",
+        required=True,
+        help='server launch command, shell-quoted, e.g. "node dist/index.js"',
+    )
+    p_run.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        metavar="ARG",
+        help="additional argument appended to the server command (repeatable)",
+    )
+    p_run.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="check ID to suppress (repeatable)",
+    )
+    p_run.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="restrict to this check ID (repeatable)",
+    )
+    p_run.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="probe tools even when annotations say they may be destructive "
+        "(use only against sandboxed servers)",
+    )
+    p_run.add_argument(
+        "--allow-tool",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="permit runtime probes (RUNTIME001, ENCODING001, HYGIENE001) against "
+        "this tool even when annotations gate it out (repeatable; mutually exclusive "
+        "with --allow-destructive; PATHSAFE001 write probe requires --allow-destructive)",
+    )
+    p_run.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 on failed warnings too (default: only severity=error trips CI)",
+    )
+    p_run.add_argument("--json", metavar="PATH", help="write the JSON report here")
+    p_run.add_argument(
+        "--startup-timeout",
+        type=float,
+        default=10.0,
+        metavar="SECONDS",
+        help="server initialize budget (default 10)",
+    )
+    p_run.add_argument(
+        "--call-timeout",
+        type=float,
+        default=10.0,
+        metavar="SECONDS",
+        help="per-tool-call probe budget (default 10)",
+    )
+
+    sub.add_parser("list-checks", help="list registered checks and citations")
+    return parser
+
+
+def _unknown_ids(skip: list[str], only: list[str]) -> list[str]:
+    known = set(REGISTRY.ids())
+    return [i for i in (*skip, *only) if i not in known]
+
+
+def _select_checks(skip: list[str], only: list[str]) -> list[CheckSpec]:
+    load_checks()
+    unknown = _unknown_ids(skip, only)
+    if unknown:
+        raise ValueError(f"unknown check id(s): {', '.join(unknown)}")
+    selected = REGISTRY.all()
+    if only:
+        selected = [c for c in selected if c.id in set(only)]
+    if skip:
+        selected = [c for c in selected if c.id not in set(skip)]
+    return selected
+
+
+async def run_checks(
+    command: list[str],
+    *,
+    skip: list[str] | None = None,
+    only: list[str] | None = None,
+    allow_destructive: bool = False,
+    allow_tools: list[str] | None = None,
+    strict: bool = False,
+    startup_timeout: float = 10.0,
+    call_timeout: float = 10.0,
+    sandbox_roots: list[str] | None = None,
+) -> AuditReport:
+    """Spawn server, execute selected checks, return the report.
+
+    `sandbox_roots` are the server's allowed directories (the values passed
+    via --arg at the CLI); checks use them to place probe fixtures and to
+    corroborate filesystem side effects. They are NEVER derived by guessing
+    tokens out of the server command.
+    """
+    specs = _select_checks(list(skip or []), list(only or []))
+    report = AuditReport(server_command=list(command), tool_version=__version__, strict=strict)
+
+    async with connect(command, startup_timeout=startup_timeout) as handle:
+        ctx = CheckContext(
+            session=handle.session,
+            tools=handle.tools,
+            allow_destructive=allow_destructive,
+            allow_tools=tuple(allow_tools or []),
+            call_timeout=call_timeout,
+            extra={"sandbox_roots": [Path(a) for a in sandbox_roots or []]},
+        )
+        for spec in specs:
+            try:
+                produced = await spec.fn(ctx)
+            except Exception as e:  # noqa: BLE001 — a crashing check must not abort the audit
+                produced = [
+                    CheckResult(
+                        check_id=spec.id,
+                        severity=spec.severity,
+                        status="fail",
+                        message=f"check crashed: {type(e).__name__}: {e}",
+                        citation=spec.citation,
+                        details={"traceback": traceback.format_exc()},
+                    )
+                ]
+            if produced is None:
+                continue
+            report.results.extend(produced if isinstance(produced, list) else [produced])
+
+    return report
+
+
+def render_report(report: AuditReport) -> None:
+    table = Table(title="mcp-audit results", title_justify="left", expand=False)
+    columns: list[tuple[str, dict[str, Any]]] = [
+        ("check", {"no_wrap": True}),
+        ("sev", {"no_wrap": True}),
+        ("status", {"no_wrap": True}),
+        ("tool", {}),
+        ("message", {}),
+    ]
+    for col, opts in columns:
+        table.add_column(col, **opts)
+
+    style_for_status = {"pass": "green", "fail": "red", "skip": "yellow"}
+    for r in sorted(report.results, key=lambda x: (x.check_id, x.tool_name or "")):
+        table.add_row(
+            r.check_id,
+            r.severity,
+            f"[{style_for_status[r.status]}]{r.status}[/]",
+            r.tool_name or "—",
+            r.message
+            if len(r.message) <= _MAX_MESSAGE_COL
+            else r.message[:_TRUNCATED_MESSAGE_COL] + "...",
+        )
+    console.print(table)
+
+    s = report.summary
+    console.print(
+        f"[bold]{s['total']}[/] checks · "
+        f"[green]{s['status']['pass']} pass[/] · "
+        f"[red]{s['status']['fail']} fail[/] "
+        f"(error:{s['failed_by_severity']['error']}, "
+        f"warning:{s['failed_by_severity']['warning']}) · "
+        f"[yellow]{s['status']['skip']} skip[/]"
+    )
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    try:
+        command = shlex.split(args.server) + list(args.arg)
+    except ValueError as e:
+        print(f"mcp-audit: cannot parse --server: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    if not command:
+        print("mcp-audit: --server must not be empty", file=sys.stderr)
+        return EXIT_USAGE
+    if args.allow_destructive and args.allow_tool:
+        print(
+            "mcp-audit: --allow-tool and --allow-destructive are mutually exclusive "
+            "(per-tool consent is the granular alternative to the global override)",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
+    load_checks()
+    unknown = _unknown_ids(list(args.skip), list(args.only))
+    if unknown:
+        print(
+            f"mcp-audit: unknown check id(s): {', '.join(unknown)} "
+            f"(registered: {', '.join(REGISTRY.ids())})",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
+    try:
+        report = asyncio.run(
+            run_checks(
+                command,
+                skip=args.skip,
+                only=args.only,
+                allow_destructive=args.allow_destructive,
+                allow_tools=list(args.allow_tool),
+                strict=args.strict,
+                startup_timeout=args.startup_timeout,
+                call_timeout=args.call_timeout,
+                sandbox_roots=list(args.arg),
+            )
+        )
+    except ServerStartupError as e:
+        print(f"mcp-audit: server failed to start:\n{e}", file=sys.stderr)
+        # Honor --json even on startup failure: consumers get a machine-
+        # readable report (zero results + error detail), never a bare exit.
+        report = AuditReport(server_command=command, tool_version=__version__, error=str(e))
+        if args.json:
+            _write_json(report, args.json)
+        return report.exit_code
+    except BaseExceptionGroup as eg:
+        # anyio wraps teardown-time errors (e.g. the server dying mid-run)
+        # in exception groups; surface a clean diagnostic, not a traceback.
+        first: BaseException = eg
+        while isinstance(first, BaseExceptionGroup) and first.exceptions:
+            first = first.exceptions[0]
+        print(
+            f"mcp-audit: unexpected error during server session teardown: "
+            f"{type(first).__name__}: {first}",
+            file=sys.stderr,
+        )
+        return EXIT_CHECKS_FAILED
+    except KeyboardInterrupt:
+        print("\nmcp-audit: interrupted", file=sys.stderr)
+        return EXIT_INTERRUPTED
+
+    render_report(report)
+    if args.json:
+        _write_json(report, args.json)
+    return report.exit_code
+
+
+def _write_json(report: AuditReport, path: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(report.to_json() + "\n")
+    console.print(f"[dim]report written to {path}[/]")
+
+
+def cmd_list_checks() -> int:
+    load_checks()
+    table = Table(title="registered checks", title_justify="left")
+    table.add_column("id", no_wrap=True)
+    table.add_column("scope", no_wrap=True)
+    table.add_column("default severity", no_wrap=True)
+    table.add_column("citation", no_wrap=False)
+    for spec in REGISTRY.all():
+        table.add_row(spec.id, spec.scope, spec.severity, spec.citation or "—")
+    console.print(table)
+    return EXIT_OK
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "run":
+        return cmd_run(args)
+    if args.command == "list-checks":
+        return cmd_list_checks()
+    parser.error(f"unknown command {args.command!r}")  # exits 2
+    return EXIT_USAGE  # pragma: no cover
+
+
+if __name__ == "__main__":
+    sys.exit(main())
