@@ -8,7 +8,7 @@ Skipped unless MCP_FIXTURE_SERVER names a runnable fixture command, e.g.:
     export MCP_FIXTURE_SERVER="python tests/fixtures/fixture_server.py"
     pytest -m integration
 
-Coverage (v0.3, extended in v0.5):
+Coverage:
 
 - RUNTIME001 (dogfooded here):
   - strict_echo   -> passes (conformant rejection)

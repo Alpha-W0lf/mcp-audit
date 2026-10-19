@@ -5,7 +5,7 @@ Hardening:
   seconds, the process is torn down and `ServerStartupError` is raised with the
   captured stderr tail (a server that dies before initialize produces a clear
   error, not a hang);
-- stderr capture: the server's stderr goes to an in-memory buffer, never into
+- stderr capture: the server's stderr goes to an anonymous temp file, never into
   tool results or our own stdout — a chatty server cannot corrupt JSON output
   or masquerade as tool content;
 - clean teardown: connection unwinds via context managers even when checks

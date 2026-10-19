@@ -1,8 +1,7 @@
 """SCHEMA001 — advertised inputSchema internal consistency.
 
-Refactor of v0.1's check_schema_well_formed onto the registry/CheckResult
-model. Static well-formedness only: no tool calls are made. Seeded during
-investigation of public issue modelcontextprotocol/servers#4651 filed by others;
+Static well-formedness only: no tool calls are made. Seeded during
+investigation of public issue modelcontextprotocol/servers#4651;
 this check does not catch the #4651 production shape (runtime stricter than advertised required) —
 that is RUNTIME001. Catches static schema inconsistencies before tools are
 probed.
@@ -29,7 +28,7 @@ VALID_TYPES = {
 
 
 def schema_problems(tool_name: str, schema: dict[str, Any]) -> list[str]:
-    """Pure helper (kept from v0.1 for unit-testability): list of problems."""
+    """Pure helper, unit-testable on its own: list of schema problems."""
     problems: list[str] = []
 
     if not schema:

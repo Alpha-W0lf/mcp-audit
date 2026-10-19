@@ -7,6 +7,20 @@ this project uses semantic versioning.
 
 ### Changed
 
+- PATHSAFE001 finds snake_case and kebab-case path arguments such as
+  `target_path`, `output_dir` and `source-file`, as well as camelCase. A
+  property counts as a path only when its name ends in a path word, so
+  `file_type` and `folder_id` are not probed.
+- RUNTIME001 probes tools that advertise no required fields with one
+  baseline call, so a runtime-required field missing from `tools/list` is
+  caught there too. Pass messages count any inconclusive omission probes,
+  and a tool whose omission probes are all inconclusive now skips instead
+  of passing.
+- RUNTIME001 reports baseline-call drift only for validation errors, so an
+  error that merely mentions a property ("rate limit exceeded") is a skip.
+- ENCODING001 reports a skip when its local fixture cannot be written.
+- ENCODING001 finds file arguments with the same path-name rule as
+  PATHSAFE001, so `targetPath` counts and `file_type` does not.
 - ENCODING001 now drives head/count limits typed `number` as well as
   `integer`. zod's `z.number()`, common in TypeScript MCP servers, emits
   `number`, so the check now reaches their chunked head/tail readers. The

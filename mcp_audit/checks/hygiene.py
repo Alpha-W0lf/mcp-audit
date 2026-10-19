@@ -7,12 +7,11 @@ identity and directory layout to every client that receives it; the correct
 shape is a stable, server-relative identifier (``source_id: docs/report``).
 
 Citation choice: unlike SCHEMA001/RUNTIME001/ENCODING001/PATHSAFE001 there is
-no single upstream issue to cite — this check generalizes concrete
-``/Users/...`` path leaks in the author's own MCP tool citations, and the
-canonical statement of the rule lives in this repo's own README check
-table. The citation therefore links that table (the MCP spec
-defines no path-hygiene conformance rule, so the modelcontextprotocol spec
-URL would not document *this* bug class).
+no single upstream issue to cite — this check covers a common leak class
+(home or server-root paths in tool output), and the canonical statement of
+the rule lives in this repo's own README check table. The citation therefore
+links that table (the MCP spec defines no path-hygiene conformance rule, so
+the modelcontextprotocol spec URL would not document *this* bug class).
 
 Protocol per probe-eligible tool (same readOnlyHint safety gate as every
 runtime check):

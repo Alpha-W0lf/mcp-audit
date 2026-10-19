@@ -10,8 +10,7 @@ Please allow time for a fix before disclosing publicly.
 ## What mcp-audit does to the server it audits
 
 - **Read-only by default.** It calls only tools that declare
-  `readOnlyHint=true`. Tools with no hint, or with `destructiveHint=true`,
-  are skipped.
+  `readOnlyHint=true`. Every other tool is skipped.
 - **Consent flags.** `--allow-tool NAME` allows probes on one named tool.
   `--allow-destructive` allows probes on every tool. A write-capable tool
   probed this way may keep a file or record named `mcp-audit-probe`.

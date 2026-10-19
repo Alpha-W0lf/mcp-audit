@@ -1,6 +1,6 @@
 """ENCODING001 — multi-byte UTF-8 corruption at fixed-size chunk boundaries.
 
-Seeded by public issue modelcontextprotocol/servers#4666 filed by others:
+Seeded by public issue modelcontextprotocol/servers#4666:
 file-reading tools that split a file into fixed-size byte chunks and decoded each chunk
 *independently* silently replaced every multi-byte UTF-8 sequence straddling a chunk boundary
 with U+FFFD mojibake. This check reproduces that failure class.
@@ -33,14 +33,17 @@ replacement) also drops the marker and is flagged. The canonical fix for
 #4666 — decode the complete buffer, then slice — keeps the marker intact and
 passes.
 
-Safety: read-only probes only. Every candidate goes through the shared
-annotation gate (`mcp_audit.safety`); tools not asserting readOnlyHint=true
-are skipped, tool-call failures degrade to skips, and this check never raises.
+Safety: every tool call is a read. The check writes one local fixture file
+(see `_write_fixture`) and deletes it when done. Every candidate goes
+through the shared annotation gate (`mcp_audit.safety`); tools not
+asserting readOnlyHint=true are skipped. Tool-call failures and an
+unwritable fixture degrade to skips, so this check never raises.
 
 Discovery is intentionally conservative: a tool counts as file-reading iff
-its inputSchema declares a string property whose name is (or contains as a
-snake/kebab-bounded token) ``path`` / ``file`` — covering `path`,
-`filepath`, `file_name`, … while rejecting `profile`, `text`, and friends.
+its inputSchema declares a string property that PATHSAFE001's rule
+(`path_safety.is_path_like_name`) calls a path — `path`, `filepath`,
+`file_name`, `targetPath`, … while rejecting `profile`, `file_type` and
+friends. One rule serves both checks.
 Matching tool name/description produced too many false positives; if a
 server profile ever reaches CheckContext.extra it can extend discovery
 without changing callers.
@@ -55,6 +58,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from mcp_audit.checks.path_safety import path_like_properties
 from mcp_audit.driver import call_tool_normalized
 from mcp_audit.models import CheckResult, Severity, Status
 from mcp_audit.registry import CheckContext, check, sandbox_roots_from_extra
@@ -84,11 +88,6 @@ _PADDING_RUN_MIN = 64
 _PADDING_RUN_RE = re.compile(f"a{{{_PADDING_RUN_MIN},}}")
 
 # inputSchema heuristics ------------------------------------------------------
-# snake/kebab-boundary aware so "profile"/"manifesto" don't match "file".
-_PATH_PROP_RE = re.compile(
-    r"(?:^|[_-])(path|filepath|file_path|filename|file_name|file)(?:[_-]|$)",
-    re.IGNORECASE,
-)
 _LIMIT_TYPES = ("integer", "number")
 _LIMIT_PROP_RE = re.compile(
     r"^(head|tail|lines|bytes|count|limit|length|size|"
@@ -113,20 +112,10 @@ def boundary_fixture(tail_pad: int = _TAIL_PAD_BYTES) -> bytes:
     return bytes(out)
 
 
-def _string_properties(tool: Any) -> dict[str, Any]:
-    return {
-        name: spec
-        for name, spec in tool.properties.items()
-        if isinstance(spec, dict) and spec.get("type") == "string"
-    }
-
-
 def find_path_argument(tool: Any) -> str | None:
-    """First string property whose name looks like a filesystem path."""
-    for name in _string_properties(tool):
-        if _PATH_PROP_RE.search(name):
-            return name
-    return None
+    """Best string property whose name looks like a filesystem path."""
+    candidates = path_like_properties(tool)
+    return candidates[0] if candidates else None
 
 
 def is_file_reader(tool: Any) -> bool:
@@ -338,7 +327,10 @@ async def check_encoding_chunk_boundaries(
     if not candidates:
         return [_result("skip", "no file-reading tool to probe", None, {})]
 
-    fixture_path = _write_fixture(sandbox_roots_from_extra(ctx.extra))
+    try:
+        fixture_path = _write_fixture(sandbox_roots_from_extra(ctx.extra))
+    except OSError as e:
+        return [_result("skip", f"could not write the probe fixture: {e}", None, {})]
     try:
         return [await _probe_tool(ctx, tool, fixture_path) for tool in candidates]
     finally:

@@ -29,7 +29,8 @@ mcp-audit run --server "python tests/fixtures/fixture_server.py"      # watch th
 - Route every tool call through `mcp_audit.safety.probe_eligibility` and
   `mcp_audit.driver.call_tool_normalized`. Probes that write also require `allow_destructive`.
 - Each job has one owner: exit-code policy in `models.py`, sandbox roots via
-  `registry.sandbox_roots_from_extra`, argument synthesis via `checks/runtime_required.baseline_arguments`.
+  `registry.sandbox_roots_from_extra`, argument synthesis via `checks/runtime_required.baseline_arguments`,
+  path-argument names via `checks/path_safety.is_path_like_name`.
 - Mask user-directory segments in any leaked path a check reports.
 
 ## Map

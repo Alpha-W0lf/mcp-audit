@@ -175,17 +175,113 @@ async def test_unsynthesizable_schema_skips():
 
 
 @pytest.mark.asyncio
-async def test_no_required_fields_is_trivial_pass():
-    session = FakeSession(lambda args: (True, ""))
+async def test_no_required_fields_is_probed_not_trivially_passed():
+    calls: list[dict] = []
+
+    def behavior(args):
+        calls.append(args)
+        return True, "ok"
+
     t = AdvertisedTool(
         name="noargs",
         description=None,
         input_schema={"type": "object", "properties": {}},
         annotations={"readOnlyHint": True},
     )
-    results = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t]))
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(FakeSession(behavior), [t]))
     r = _result_for(results, "noargs")
-    assert r.status == "pass" and "nothing to probe" in r.message
+    assert calls == [{}]
+    assert r.status == "pass" and "accepted" in r.message
+
+
+@pytest.mark.asyncio
+async def test_zero_required_tool_with_runtime_required_field_fails():
+    # tools/list advertises nothing as required, but the runtime demands `x`:
+    # the #4651 shape in its most extreme form.
+    session = FakeSession(
+        lambda args: (
+            (False, "Invalid arguments: missing required parameter 'x'")
+            if "x" not in args
+            else (True, "ok")
+        )
+    )
+    t = AdvertisedTool(
+        name="hidden_x",
+        description=None,
+        input_schema={"type": "object", "properties": {"x": {"type": "string"}}},
+        annotations={"readOnlyHint": True},
+    )
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t]))
+    r = _result_for(results, "hidden_x")
+    assert r.status == "fail" and r.severity == "error"
+    assert "'x'" in r.message
+
+
+@pytest.mark.asyncio
+async def test_zero_required_tool_unrelated_error_naming_optional_field_skips():
+    # "rate limit exceeded" mentions the optional `limit` property but is not
+    # a validation error; it must not become an error-severity finding.
+    session = FakeSession(lambda args: (False, "rate limit exceeded, retry later"))
+    t = AdvertisedTool(
+        name="search",
+        description=None,
+        input_schema={"type": "object", "properties": {"limit": {"type": "integer"}}},
+        annotations={"readOnlyHint": True},
+    )
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t]))
+    assert _result_for(results, "search").status == "skip"
+
+
+@pytest.mark.parametrize(
+    "error_text", ["rate limit exceeded, retry later", "requests must be spaced 1s apart"]
+)
+@pytest.mark.asyncio
+async def test_baseline_error_without_validation_wording_skips(error_text):
+    # The error mentions an optional property but is not argument validation.
+    session = FakeSession(lambda args: (False, error_text))
+    t = AdvertisedTool(
+        name="search",
+        description=None,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "q": {"type": "string"},
+                "limit": {"type": "integer"},
+                "requests": {"type": "integer"},
+            },
+            "required": ["q"],
+        },
+        annotations={"readOnlyHint": True},
+    )
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(session, [t]))
+    assert _result_for(results, "search").status == "skip"
+
+
+@pytest.mark.asyncio
+async def test_all_inconclusive_omissions_skip():
+    def behavior(args):
+        if "a" in args and "b" in args:
+            return True, "ok"
+        return False, "internal server error"
+
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(FakeSession(behavior), [_tool(["a", "b"])]))
+    r = _result_for(results)
+    assert r.status == "skip" and "inconclusive" in r.message
+
+
+@pytest.mark.asyncio
+async def test_pass_message_counts_inconclusive_omissions():
+    def behavior(args):
+        if "a" not in args:
+            return False, "internal server error"  # names no field: inconclusive
+        if "b" not in args:
+            return False, "missing required parameter 'b'"
+        return True, "ok"
+
+    results = await REGISTRY.get("RUNTIME001").fn(_ctx(FakeSession(behavior), [_tool(["a", "b"])]))
+    r = _result_for(results)
+    assert r.status == "pass"
+    assert "1 of 2" in r.message and "all 2" not in r.message
 
 
 @pytest.mark.asyncio

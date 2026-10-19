@@ -1,16 +1,21 @@
 """RUNTIME001 — advertised `required` vs runtime-enforced arguments.
 
-The differentiating check. Seeded by public issue modelcontextprotocol/servers#4651
-filed by others: a zod refactor changed runtime validation without updating the
+The differentiating check. Seeded by public issue modelcontextprotocol/servers#4651:
+a zod refactor changed runtime validation without updating the
 advertised JSON Schema, so `tools/list` and actual argument validation disagreed.
 This check reproduces that failure class dynamically.
 
-Protocol per probe-eligible tool that advertises >= 1 required field:
+Protocol per probe-eligible tool (a tool with no required fields gets only
+the baseline call, which still catches a runtime-required field the schema
+never lists):
 
 1. Build a baseline argument set by synthesizing values from each required
    property's declared type; call the tool with all required fields present.
-   If the baseline itself fails, mark the tool skip (we cannot distinguish
-   schema drift from a generally-broken tool). String `pattern` constraints
+   If the baseline fails with a validation error (see _VALIDATION_WORDS_RE)
+   naming a property the schema does not list as required, that is the
+   #4651 shape -> error. Any other baseline
+   failure marks the tool skip (we cannot distinguish schema drift from a
+   generally-broken tool). String `pattern` constraints
    are honored during synthesis (see _synthesize_pattern_string): a field
    whose pattern admits no candidate is unsynthesizable, so the baseline is
    skipped rather than probing with a value the server will reject.
@@ -22,7 +27,9 @@ Protocol per probe-eligible tool that advertises >= 1 required field:
      `required`               -> runtime stricter than advertised -> error
                                  (clients following tools/list will break —
                                  the #4651 production shape)
-   - unparseable/other error  -> inconclusive; recorded in details only
+   - unparseable/other error  -> inconclusive; recorded in details and
+                                 counted in the pass message (all
+                                 inconclusive -> skip)
 
 Safety: this check CALLS tools. It runs only on tools whose server-asserted
 annotations claim readOnlyHint=true (see mcp_audit.safety), on tools named
@@ -47,6 +54,10 @@ CITATION_4651 = "https://github.com/modelcontextprotocol/servers/issues/4651"
 # artifact named after it inside the server's allowed root (by design;
 # operator-consented — see README).
 _SYNTHESIZED_STRING = "mcp-audit-probe"
+# Wording that marks an error as argument validation: "Invalid arguments"
+# (MCP SDKs), "Required" (zod v3), "expected ..., received undefined" (zod v4),
+# "missing" / "required property" (hand-written and ajv validators).
+_VALIDATION_WORDS_RE = re.compile(r"\b(required|missing|invalid|expected|undefined)\b", re.I)
 
 
 def _synthesize_number(prop_spec: dict[str, Any], is_int: bool) -> Any:
@@ -238,20 +249,6 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
             continue
 
         required = tool.required_fields
-        if not required:
-            results.append(
-                CheckResult(
-                    check_id="RUNTIME001",
-                    severity="error",
-                    status="pass",
-                    message="no required fields advertised; nothing to probe",
-                    citation=CITATION_4651,
-                    tool_name=tool.name,
-                    details={},
-                )
-            )
-            continue
-
         base_args = baseline_arguments(tool)
         if base_args is None:
             results.append(
@@ -280,6 +277,11 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
                 for name in tool.properties
                 if name not in tool.required_fields and _mentioned_field(msg, [name])
             ]
+            # Without validation wording, a failure would be blamed on any
+            # property the error happens to mention ("rate limit exceeded"
+            # names `limit`). Require that wording before calling it drift.
+            if not _VALIDATION_WORDS_RE.search(msg):
+                unadvertised = []
             if unadvertised:
                 results.append(
                     CheckResult(
@@ -359,6 +361,27 @@ async def check_runtime_required(ctx: CheckContext) -> list[CheckResult]:
             status, severity, message = "fail", "error", "; ".join(errors)
         elif warnings:
             status, severity, message = "fail", "warning", "; ".join(warnings)
+        elif not required:
+            status, severity, message = (
+                "pass",
+                "error",
+                "no advertised-required fields; runtime accepted a call without arguments",
+            )
+        elif len(inconclusive) == len(required):
+            status, severity, message = (
+                "skip",
+                "error",
+                f"all {len(required)} omission probes inconclusive "
+                "(errors named no field); see details",
+            )
+        elif inconclusive:
+            confirmed = len(required) - len(inconclusive)
+            status, severity, message = (
+                "pass",
+                "error",
+                f"{confirmed} of {len(required)} advertised-required fields confirmed "
+                f"enforced at runtime; {len(inconclusive)} inconclusive (see details)",
+            )
         else:
             status, severity, message = (
                 "pass",

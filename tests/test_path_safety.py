@@ -2,8 +2,7 @@
 
 Layers:
 
-1. Unit: the drive-letter classifier (`is_drive_letter_path`) and the
-   path-property discovery heuristic (`path_like_properties`).
+1. Unit: the path-property discovery heuristic (`path_like_properties`).
 2. Branch unit tests against a fake session (conformant rejection -> PASS,
    unrelated error -> SKIP, missing --allow-destructive -> SKIP).
 3. Integration-style against the bundled fixture server's buggy
@@ -15,7 +14,7 @@ Layers:
 
 Integration tests spawn their own servers and do not depend on
 MCP_FIXTURE_SERVER; they are tagged `integration` so `-m "not integration"`
-deselects them like the rest of the dogfood suite.
+deselects them like the rest of the live-server suite.
 """
 
 import sys
@@ -27,7 +26,6 @@ from mcp import types
 
 from mcp_audit.checks.path_safety import (
     PROBE_VALUE,
-    is_drive_letter_path,
     path_like_properties,
 )
 from mcp_audit.driver import AdvertisedTool, connect
@@ -79,52 +77,7 @@ def _load():
     load_checks()
 
 
-# --- 1a. drive-letter classifier ---------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "C:\\Users\\me\\file.md",
-        "Z:/x",
-        "C:",
-        "c:/lowercase/drive",
-        "z:\\tmp\\out.txt",
-    ],
-)
-def test_drive_letter_forms_accepted(value):
-    assert is_drive_letter_path(value) is True
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "",
-        "notes/file.md",
-        "dir\\file.txt",
-        "/etc/passwd",
-        "plain-name.txt",
-        "\\\\server\\share\\x",
-        "CC:/double-letter",
-        "1:/digit-drive",
-        ":no-drive-letter",
-        "C",
-        "C:x",
-    ],
-)
-def test_non_drive_letter_forms_rejected(value):
-    assert is_drive_letter_path(value) is False
-
-
-def test_plain_backslash_names_out_of_scope_by_design():
-    """`dir\\file.txt` stays out of scope: on POSIX a backslash is an ordinary
-    filename character, so such a 'path' is a legitimate single filename
-    INSIDE the sandbox — writing it is unusual naming, not the #4686
-    sandbox-escape class (drive letters silently re-rooted as relative)."""
-    assert is_drive_letter_path("dir\\file.txt") is False
-
-
-# --- 1b. path-property heuristic ---------------------------------------------
+# --- 1. path-property heuristic ---------------------------------------------
 
 
 def test_path_property_detected():
@@ -138,6 +91,36 @@ def test_profile_is_not_path_like():
 def test_camel_case_and_variants_detected():
     t = _tool({"filePath": {"type": "string"}, "filename": {"type": "string"}})
     assert path_like_properties(t) == ["filePath", "filename"]
+
+
+@pytest.mark.parametrize(
+    "name", ["target_path", "output_dir", "source_path", "dest_path", "new_path", "source-file"]
+)
+def test_snake_and_kebab_case_names_detected(name):
+    assert path_like_properties(_tool({name: {"type": "string"}}, [name])) == [name]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["file_id", "file_type", "file_content", "file_format", "folder_id", "path_count", "dir_sort"],
+)
+def test_path_word_not_last_is_not_detected(name):
+    # A path word that only qualifies another noun (file_type, folder_id) is
+    # metadata, not a filesystem path argument.
+    assert path_like_properties(_tool({name: {"type": "string"}}, [name])) == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["targetPath", "outputDir", "sourceFile", "OUTPUT_DIR", "FILE_PATH", "URLPath", "fileName"],
+)
+def test_other_casings_detected(name):
+    assert path_like_properties(_tool({name: {"type": "string"}}, [name])) == [name]
+
+
+def test_snake_case_without_path_token_not_detected():
+    t = _tool({"profile_name": {"type": "string"}}, ["profile_name"])
+    assert path_like_properties(t) == []
 
 
 def test_non_string_properties_ignored():

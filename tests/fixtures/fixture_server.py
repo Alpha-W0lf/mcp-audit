@@ -24,7 +24,7 @@ Also carries:
   A whole-file read is correct; only the head path decodes 1024-byte chunks
   independently, like the official filesystem server's headFile before the
   #4666 fix. ENCODING001 must FAIL it.
-- mojibake_read    — legacy canned stub returning replacement-mangled content
+- mojibake_read    — canned stub returning replacement-mangled content
   regardless of arguments; ENCODING001 flags it too.
 - drive_letter_create — accepts Windows drive-letter paths on POSIX and
   "creates" them as literal filenames; annotated readOnlyHint=false so the
@@ -136,7 +136,7 @@ async def on_list_tools(ctx, params) -> types.ListToolsResult:
                 },
                 annotations=types.ToolAnnotations(read_only_hint=True),
             ),
-            # Legacy canned stub; still probed by ENCODING001 and expected to
+            # Canned stub; probed by ENCODING001 and expected to
             # fail (returns U+FFFD garbage for any path).
             types.Tool(
                 name="mojibake_read",

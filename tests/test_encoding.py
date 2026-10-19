@@ -134,6 +134,15 @@ def test_path_argument_discovery():
     assert find_path_argument(_tool({"profile": {"type": "string"}})) is None
 
 
+@pytest.mark.parametrize("name", ["file_type", "file_id", "folder_id"])
+def test_path_word_qualifying_another_noun_is_not_a_path_argument(name):
+    # Same rule as PATHSAFE001: a search tool's `file_type` filter is not a
+    # file to read.
+    tool = _tool({"query": {"type": "string"}, name: {"type": "string"}}, required=[])
+    assert find_path_argument(tool) is None
+    assert not is_file_reader(tool)
+
+
 def test_limit_argument_discovery():
     tool = _tool({"path": {"type": "string"}, "head": {"type": "integer"}})
     assert find_limit_argument(tool) == "head"
@@ -246,6 +255,21 @@ async def test_no_file_reading_tool_skips_entirely():
     assert r.status == "skip"
     assert r.message == "no file-reading tool to probe"
     assert r.tool_name is None
+
+
+@pytest.mark.asyncio
+async def test_unwritable_fixture_skips_instead_of_raising(monkeypatch):
+    import mcp_audit.checks.encoding as encoding
+
+    def _no_disk(_roots=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(encoding, "_write_fixture", _no_disk)
+    session = FakeSession(lambda args: (True, ""))
+    results = await _run(session, [_tool()])
+    assert [r.status for r in results] == ["skip"]
+    assert "disk full" in results[0].message
+    assert session.calls == []
 
 
 @pytest.mark.asyncio
@@ -378,8 +402,8 @@ async def test_buggy_fixture_server_read_head_fails_safe_passes():
     assert number_limit.status == "fail" and number_limit.severity == "error"
     assert "U+FFFD" in number_limit.message
 
-    legacy_stub = by_tool["mojibake_read"]
-    assert legacy_stub.status == "fail"
+    canned_stub = by_tool["mojibake_read"]
+    assert canned_stub.status == "fail"
 
     gated = by_tool["drive_letter_create"]
     assert gated.status == "skip"

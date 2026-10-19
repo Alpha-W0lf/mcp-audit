@@ -67,7 +67,7 @@ spec in the docstring.
 | `RUNTIME001` | Drift between the advertised `required` list and what the server enforces. It leaves out each required field in turn and reads the response. Runtime stricter than advertised is an error (the #4651 bug); schema stricter than runtime is a warning. | [#4651](https://github.com/modelcontextprotocol/servers/issues/4651) |
 | `ENCODING001` | File readers that split UTF-8 characters at 1024-byte chunk edges. It places a 3-byte character exactly on each edge and reads it back, using the tool's head or count limit when it has one. | [#4666](https://github.com/modelcontextprotocol/servers/issues/4666) |
 | `PATHSAFE001` | A Windows path such as `C:\file.txt` accepted on macOS or Linux and saved as a literal file name. A write probe, so it needs `--allow-destructive`. | [#4686](https://github.com/modelcontextprotocol/servers/issues/4686) |
-| `HYGIENE001` | Tool output that leaks home-directory or server-root paths (`/Users/<name>/`, `C:\Users\<name>\`, `/srv/`). | A path leak in the author's own MCP tool citations |
+| `HYGIENE001` | Tool output that leaks home-directory or server-root paths (`/Users/<name>/`, `C:\Users\<name>\`, `/srv/`). | Common leak class: home or server-root paths in tool output |
 
 ## Key engineering decisions
 
@@ -85,7 +85,7 @@ spec in the docstring.
 3. **Every live check proven against a real buggy server.** The bundled
    fixture server runs as a real process, with deliberately buggy tools and
    correct twins. CI asserts that each live check fails its buggy tool, and
-   unit tests cover every pass and skip path: 123
+   unit tests cover every pass and skip path: 137
    tests, lint and type checks on Python 3.11 and 3.12, on every PR and
    every push to `main`.
 

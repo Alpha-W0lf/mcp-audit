@@ -1,7 +1,5 @@
-"""Unit tests for SCHEMA001 (no live server needed).
-
-Adapted from v0.1: the check now returns CheckResult objects via the registry
-instead of bare problem strings.
+"""Unit tests for SCHEMA001 (no live server needed): the pure
+`schema_problems` helper and the registered check's CheckResult output.
 """
 
 import pytest

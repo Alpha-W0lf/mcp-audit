@@ -1,6 +1,6 @@
 """PATHSAFE001 — Windows drive-letter paths must be rejected on POSIX hosts.
 
-Seeded by public issue modelcontextprotocol/servers#4686 filed by others: on a POSIX host,
+Seeded by public issue modelcontextprotocol/servers#4686: on a POSIX host,
 a filesystem tool accepted `C:\\Users\\me\\file.md`, treated it as a *relative* path
 (backslash is an ordinary filename character on POSIX), and created a single
 literal backslash filename inside its sandbox root instead of rejecting an
@@ -9,9 +9,11 @@ out-of-root absolute path. This check reproduces that failure class.
 Tool-scope heuristic (documented, deliberately narrow)
 -----------------------------------------------------
 A tool is path-accepting when its inputSchema declares a **string** property
-whose name tokenizes (snake/kebab/camelCase aware) to a filesystem-path
-vocabulary token: {path, file, dir, directory, folder}, plus joined forms
-{filepath, filename, dirname, pathname}. Tokenization prevents false hits
+whose name tokenizes (snake/kebab/camelCase aware) to end in a
+filesystem-path word: {path, file, dir, directory, folder}, a joined form
+{filepath, filename, dirname, pathname}, or <path word> + "name".
+Names where the path word only qualifies another noun (`file_type`,
+`folder_id`) do not count. Tokenization prevents false hits
 like `profile` (contains "file" as a substring but is not a path). The
 first matching property wins with priority: exact `path`, then common
 spelling variants, then anything else alphabetically.
@@ -79,8 +81,6 @@ CHECK_ID = "PATHSAFE001"
 
 PROBE_VALUE = "C:\\mcp-audit-probe.txt"
 
-_DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:(?:[\\/].*)?$")
-
 _TOKEN_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+")
 
 _PATH_TOKENS = frozenset({"path", "file", "dir", "directory", "folder"})
@@ -105,27 +105,21 @@ _REJECTION_VOCAB = (
 )
 
 
-def is_drive_letter_path(value: Any) -> bool:
-    """True iff value is a Windows drive-letter path form.
-
-    Accepts `C:\\x`, `Z:/x`, bare `C:` (case-insensitive single ASCII letter
-    followed by a colon, optionally followed by a slash/backslash and more).
-    Rejects everything else, including bare `C:x` (drive-relative without a
-    separator — ambiguous and outside the documented heuristic).
-    """
-    return isinstance(value, str) and bool(_DRIVE_LETTER_RE.match(value))
+def _name_tokens(name: str) -> list[str]:
+    """Ordered tokens: split on snake/kebab/space separators, then camelCase."""
+    return [t.lower() for part in re.split(r"[\s_\-]+", name) for t in _TOKEN_RE.findall(part)]
 
 
-def _name_tokens(name: str) -> set[str]:
-    joined = re.sub(r"[\s_\-]+", "", name)
-    return {t.lower() for t in _TOKEN_RE.findall(joined)}
-
-
-def _is_path_like_name(name: str) -> bool:
-    lowered = re.sub(r"[^a-z0-9]", "", name.lower())
-    if lowered in _JOINED_NAMES:
+def is_path_like_name(name: str) -> bool:
+    """The name ends in a path word (`target_path`, `outputDir`) or in
+    <path word> + "name" (`file_name`). A path word that only qualifies
+    another noun (`file_type`, `folder_id`) is metadata, not a path."""
+    tokens = _name_tokens(name)
+    if not tokens:
+        return False
+    if tokens[-1] in _PATH_TOKENS or tokens[-1] in _JOINED_NAMES:
         return True
-    return bool(_name_tokens(name) & _PATH_TOKENS)
+    return len(tokens) >= 2 and tokens[-1] == "name" and tokens[-2] in _PATH_TOKENS
 
 
 def _priority(name: str) -> tuple[int, str]:
@@ -145,7 +139,7 @@ def path_like_properties(tool: AdvertisedTool) -> list[str]:
             continue
         ptype = spec.get("type")
         is_string = ptype == "string" or (isinstance(ptype, list) and "string" in ptype)
-        if is_string and _is_path_like_name(prop_name):
+        if is_string and is_path_like_name(prop_name):
             matches.append(prop_name)
     return sorted(matches, key=_priority)
 
