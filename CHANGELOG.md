@@ -5,6 +5,12 @@ this project uses semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- PyPI packaging as `mcp-audit-kit` (the command stays `mcp-audit`): full project metadata, a single version source in
+  `mcp_audit/__init__.py`, and a tag-triggered release workflow using PyPI
+  trusted publishing. Steps in `docs/RELEASING.md`.
+
 ### Changed
 
 - PATHSAFE001 finds snake_case and kebab-case path arguments such as

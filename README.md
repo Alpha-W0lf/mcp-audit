@@ -161,6 +161,7 @@ Actions with SHA-pinned actions.
 - [docs/REAL_SERVER_RESULTS.md](docs/REAL_SERVER_RESULTS.md): dated runs
   against the official MCP servers, with reproduction steps.
 - [docs/OPERATOR.md](docs/OPERATOR.md): CI recipes and sandbox setups.
+- [docs/RELEASING.md](docs/RELEASING.md): publishing to PyPI.
 - [SECURITY.md](SECURITY.md): what a run can touch, and how to report a
   vulnerability.
 - [CONTRIBUTING.md](CONTRIBUTING.md): development setup and the test and
